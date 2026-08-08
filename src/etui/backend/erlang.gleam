@@ -18,8 +18,11 @@ pub type ErlangTerminalState {
     cols: Int,
     rows: Int,
     mouse: Bool,
-    /// Monotonic ms at the last `window_size_ffi` call. See `size_poll_ms`.
+    /// Monotonic ms at the last `window_size_ffi` call.
     last_size_check: Int,
+    /// Monotonic ms at the last size that actually differed. Drives the
+    /// active/idle poll rate, see `resize_settle_ms`.
+    last_size_change: Int,
     /// Bytes read but not yet forming a complete escape sequence. Prepended
     /// to the next read.
     pending: String,
@@ -48,13 +51,23 @@ pub fn default_options() -> Options {
   Options(mouse: False, paste: False)
 }
 
-/// Minimum gap between terminal-size queries while polling.
+/// Gap between terminal-size queries when the window is sitting still.
 ///
 /// `io:columns/0` is a synchronous round-trip to the group leader, which is
 /// the same process serving the keyboard reader. Asking once per frame put it
-/// in contention with input and dropped keystrokes. A resize is a human-scale
-/// event, so noticing it up to 100 ms late costs nothing.
-const size_poll_ms = 100
+/// in contention with input and dropped keystrokes. Noticing a resize up to
+/// 100 ms late costs nothing when nothing is moving.
+const size_poll_idle_ms = 100
+
+/// Gap between size queries while a resize is under way.
+///
+/// At the idle rate a drag-resize redraws ten times a second, which reads as
+/// stepping rather than following the mouse. Nobody types while dragging a
+/// window edge, so the contention the idle rate exists to avoid is not in play.
+const size_poll_active_ms = 16
+
+/// How long after the last size change to keep polling at the active rate.
+const resize_settle_ms = 400
 
 // ─────────────────────────────────────────────────────────────────
 // Backend construction
@@ -167,17 +180,18 @@ fn init_terminal(opts: Options) -> Result(ErlangTerminalState, Error) {
         Error(_) -> #(80, 24)
       }
       install_sigint_cleanup_ffi(fn() { terminal_cleanup() })
-      Ok(
-        ErlangTerminalState(
-          raw_mode_active: True,
-          cols: cols,
-          rows: rows,
-          mouse: opts.mouse,
-          last_size_check: monotonic_ms_ffi(),
-          pending: "",
-          queue: [],
-        ),
-      )
+      Ok(ErlangTerminalState(
+        raw_mode_active: True,
+        cols: cols,
+        rows: rows,
+        mouse: opts.mouse,
+        last_size_check: monotonic_ms_ffi(),
+        // Treat init as a size change: the first moments of an app are
+        // exactly when a terminal may still be settling its geometry.
+        last_size_change: monotonic_ms_ffi(),
+        pending: "",
+        queue: [],
+      ))
     }
     Error(reason) -> Error(IOError(reason))
   }
@@ -249,7 +263,7 @@ fn check_resize(
   state: ErlangTerminalState,
 ) -> #(ErlangTerminalState, List(InputEvent)) {
   let now = monotonic_ms_ffi()
-  case now - state.last_size_check < size_poll_ms {
+  case now - state.last_size_check < poll_interval(state, now) {
     True -> #(state, [])
     False -> {
       let checked = ErlangTerminalState(..state, last_size_check: now)
@@ -257,13 +271,29 @@ fn check_resize(
         Ok(#(c, r)) ->
           case c == state.cols && r == state.rows {
             True -> #(checked, [])
-            False -> #(ErlangTerminalState(..checked, cols: c, rows: r), [
-              backend.Resize(c, r),
-            ])
+            False -> #(
+              ErlangTerminalState(
+                ..checked,
+                cols: c,
+                rows: r,
+                last_size_change: now,
+              ),
+              [backend.Resize(c, r)],
+            )
           }
         Error(_) -> #(checked, [])
       }
     }
+  }
+}
+
+// A resize arrives as a burst of small changes while the edge is dragged. The
+// first one switches to the active rate; the rate falls back once the window
+// has been still for resize_settle_ms.
+fn poll_interval(state: ErlangTerminalState, now: Int) -> Int {
+  case now - state.last_size_change < resize_settle_ms {
+    True -> size_poll_active_ms
+    False -> size_poll_idle_ms
   }
 }
 
