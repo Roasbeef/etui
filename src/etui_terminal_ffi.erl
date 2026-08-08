@@ -1,6 +1,6 @@
 -module(etui_terminal_ffi).
 
--export([enter_raw/0, exit_raw/0, window_size/0, read_with_timeout/1,
+-export([enter_raw/0, exit_raw/0, window_size/0, monotonic_ms/0, read_with_timeout/1,
          install_sigint_cleanup/1, uninstall_sigint_cleanup/0,
          write_cleanup/0]).
 
@@ -142,7 +142,7 @@ install_watchdog() ->
         "; F=" ++ shell_quote(Flag) ++
         "; while kill -0 \"$P\" 2>/dev/null; do sleep 0.05; done" ++
         "; [ -f \"$F\" ] && { rm -f \"$F\"; exit 0; }" ++
-        "; printf $'\\x1b[?1007l\\x1b[?1015l\\x1b[?1006l\\x1b[?1005l\\x1b[?1003l\\x1b[?1002l\\x1b[?1000l\\x1b[?1049l\\x1b[0m\\x1b[?25h'" ++
+        "; printf $'\\x1b[?1007l\\x1b[?1015l\\x1b[?1006l\\x1b[?1005l\\x1b[?1003l\\x1b[?1002l\\x1b[?1000l\\x1b[?1049l\\x1b[?7h\\x1b[0m\\x1b[?25h'" ++
         " 2>/dev/null > " ++ TTYPath ++
         "; stty sane < " ++ TTYPath ++ " > " ++ TTYPath ++ " 2>/dev/null",
     %% Outer bash: launch orphan subshell and exit immediately.
@@ -196,7 +196,7 @@ uninstall_sigint_cleanup() ->
     ok.
 
 cleanup_sequence() ->
-    "\e[?1007l\e[?1015l\e[?1006l\e[?1005l\e[?1003l\e[?1002l\e[?1000l\e[?1049l\e[0m\e[?25h".
+    "\e[?1007l\e[?1015l\e[?1006l\e[?1005l\e[?1003l\e[?1002l\e[?1000l\e[?1049l\e[?7h\e[0m\e[?25h".
 
 write_cleanup_to_tty(WithNewline) ->
     Suffix = case WithNewline of
@@ -261,6 +261,10 @@ normalise_tty_path(TTY) ->
 
 shell_quote(Path) ->
     "'" ++ lists:flatten(string:replace(Path, "'", "'\"'\"'", all)) ++ "'".
+
+%% Monotonic clock in milliseconds, for throttling window_size/0 polls.
+monotonic_ms() ->
+    erlang:monotonic_time(millisecond).
 
 window_size() ->
     case io:columns() of

@@ -14,8 +14,23 @@ import gleam/string
 // Types
 
 pub type ErlangTerminalState {
-  ErlangTerminalState(raw_mode_active: Bool, cols: Int, rows: Int, mouse: Bool)
+  ErlangTerminalState(
+    raw_mode_active: Bool,
+    cols: Int,
+    rows: Int,
+    mouse: Bool,
+    /// Monotonic ms at the last `window_size_ffi` call. See `size_poll_ms`.
+    last_size_check: Int,
+  )
 }
+
+/// Minimum gap between terminal-size queries while polling.
+///
+/// `io:columns/0` is a synchronous round-trip to the group leader, which is
+/// the same process serving the keyboard reader. Asking once per frame put it
+/// in contention with input and dropped keystrokes. A resize is a human-scale
+/// event, so noticing it up to 200 ms late costs nothing.
+const size_poll_ms = 200
 
 // ─────────────────────────────────────────────────────────────────
 // Backend construction
@@ -67,6 +82,11 @@ fn window_size_ffi() -> Result(#(Int, Int), String) {
   panic as "etui/backend/erlang requires the Erlang target"
 }
 
+@external(erlang, "etui_terminal_ffi", "monotonic_ms")
+fn monotonic_ms_ffi() -> Int {
+  panic as "etui/backend/erlang requires the Erlang target"
+}
+
 @external(erlang, "io", "put_chars")
 fn write_string(s: String) -> Nil {
   let _ = s
@@ -98,19 +118,29 @@ fn write_cleanup_ffi() -> Nil {
 // ─────────────────────────────────────────────────────────────────
 // Implementation
 
+// DECAWM off. With auto-wrap on, writing the bottom-right cell wraps the
+// cursor and scrolls the screen, so the last column had to be left unused.
+// Turning it off reclaims that column; `write_cleanup` turns it back on.
+const disable_autowrap = "\u{001B}[?7l"
+
 fn init_terminal(mouse: Bool) -> Result(ErlangTerminalState, Error) {
   init_tty_state()
   let init_ops = case mouse {
-    True -> [EnterAltScreen, ClearScreen, EnableMouse]
-    False -> [EnterAltScreen, ClearScreen]
+    True -> [
+      EnterAltScreen,
+      Write(disable_autowrap),
+      ClearScreen,
+      EnableMouse,
+    ]
+    False -> [EnterAltScreen, Write(disable_autowrap), ClearScreen]
   }
   case write_ops_to_stdout(init_ops) {
     Ok(Nil) -> {
       enter_raw_ffi()
       set_raw_state(True)
       let #(cols, rows) = case window_size_ffi() {
-        Ok(#(c, r)) -> #(c - 1, r)
-        Error(_) -> #(79, 24)
+        Ok(#(c, r)) -> #(c, r)
+        Error(_) -> #(80, 24)
       }
       install_sigint_cleanup_ffi(fn() { terminal_cleanup() })
       Ok(ErlangTerminalState(
@@ -118,6 +148,7 @@ fn init_terminal(mouse: Bool) -> Result(ErlangTerminalState, Error) {
         cols: cols,
         rows: rows,
         mouse: mouse,
+        last_size_check: monotonic_ms_ffi(),
       ))
     }
     Error(reason) -> Error(IOError(reason))
@@ -142,17 +173,24 @@ fn poll_input(
     Ok(input) -> parse_input(input)
     Error(_) -> backend.Tick
   }
-  case window_size_ffi() {
-    Ok(#(c, r)) ->
-      case c - 1 == state.cols && r == state.rows {
-        True -> Ok(#(input_event, state))
-        False ->
-          Ok(#(
-            backend.Resize(c - 1, r),
-            ErlangTerminalState(..state, cols: c - 1, rows: r),
-          ))
+  let now = monotonic_ms_ffi()
+  case now - state.last_size_check < size_poll_ms {
+    True -> Ok(#(input_event, state))
+    False -> {
+      let checked = ErlangTerminalState(..state, last_size_check: now)
+      case window_size_ffi() {
+        Ok(#(c, r)) ->
+          case c == state.cols && r == state.rows {
+            True -> Ok(#(input_event, checked))
+            False ->
+              Ok(#(
+                backend.Resize(c, r),
+                ErlangTerminalState(..checked, cols: c, rows: r),
+              ))
+          }
+        Error(_) -> Ok(#(input_event, checked))
       }
-    Error(_) -> Ok(#(input_event, state))
+    }
   }
 }
 
@@ -160,8 +198,8 @@ fn get_terminal_size(
   state: ErlangTerminalState,
 ) -> Result(#(TerminalSize, ErlangTerminalState), Error) {
   case window_size_ffi() {
-    Ok(#(w, h)) -> Ok(#(backend.TerminalSize(width: w - 1, height: h), state))
-    Error(_) -> Ok(#(backend.TerminalSize(width: 79, height: 24), state))
+    Ok(#(w, h)) -> Ok(#(backend.TerminalSize(width: w, height: h), state))
+    Error(_) -> Ok(#(backend.TerminalSize(width: 80, height: 24), state))
   }
 }
 
@@ -200,7 +238,7 @@ fn write_ops_to_stdout(ops: List(RenderOp)) -> Result(Nil, String) {
 fn render_op_to_string(op: RenderOp) -> String {
   case op {
     MoveCursor(x, y) ->
-      "\u{001B}[" <> int_to_string(y + 1) <> ";" <> int_to_string(x + 1) <> "H"
+      "\u{001B}[" <> int.to_string(y + 1) <> ";" <> int.to_string(x + 1) <> "H"
     Write(s) -> s
     ClearScreen -> "\u{001B}[2J\u{001B}[H"
     EnterAltScreen -> "\u{001B}[?1049h"
@@ -334,36 +372,5 @@ fn parse_sgr_mouse(payload: String) -> InputEvent {
         _, _, _ -> backend.KeyPress("\u{001B}[<" <> payload)
       }
     _ -> backend.KeyPress("\u{001B}[<" <> payload)
-  }
-}
-
-fn int_to_string(n: Int) -> String {
-  case n {
-    0 -> "0"
-    1 -> "1"
-    2 -> "2"
-    3 -> "3"
-    4 -> "4"
-    5 -> "5"
-    6 -> "6"
-    7 -> "7"
-    8 -> "8"
-    9 -> "9"
-    _ -> {
-      let digit = case n % 10 {
-        0 -> "0"
-        1 -> "1"
-        2 -> "2"
-        3 -> "3"
-        4 -> "4"
-        5 -> "5"
-        6 -> "6"
-        7 -> "7"
-        8 -> "8"
-        9 -> "9"
-        _ -> "?"
-      }
-      int_to_string(n / 10) <> digit
-    }
   }
 }
