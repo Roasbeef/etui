@@ -217,30 +217,34 @@ pub fn expand_tabs(s: String, tab_width: Int) -> String {
   case string.contains(s, "\t") {
     False -> s
     True ->
-      expand_tabs_loop(string.to_graphemes(s), int.max(1, tab_width), 0, "")
+      expand_tabs_loop(string.to_graphemes(s), int.max(1, tab_width), 0, [])
   }
 }
 
+// Pieces accumulate newest-first and are joined once. Appending to the string
+// on every grapheme would copy the whole accumulator each time, which is
+// O(n^2) in the length of the line.
 fn expand_tabs_loop(
   gs: List(String),
   tab_width: Int,
   col: Int,
-  acc: String,
+  rev_acc: List(String),
 ) -> String {
   case gs {
-    [] -> acc
+    [] -> string.concat(list.reverse(rev_acc))
     ["\t", ..rest] -> {
       let pad = tab_width - col % tab_width
-      expand_tabs_loop(
-        rest,
-        tab_width,
-        col + pad,
-        acc <> string.repeat(" ", pad),
-      )
+      expand_tabs_loop(rest, tab_width, col + pad, [
+        string.repeat(" ", pad),
+        ..rev_acc
+      ])
     }
-    ["\n", ..rest] -> expand_tabs_loop(rest, tab_width, 0, acc <> "\n")
+    ["\n", ..rest] -> expand_tabs_loop(rest, tab_width, 0, ["\n", ..rev_acc])
     [g, ..rest] ->
-      expand_tabs_loop(rest, tab_width, col + grapheme_cell_width(g), acc <> g)
+      expand_tabs_loop(rest, tab_width, col + grapheme_cell_width(g), [
+        g,
+        ..rev_acc
+      ])
   }
 }
 
@@ -302,35 +306,45 @@ fn wrap_para_words(s: String, max_width: Int) -> List(String) {
 
 // Split a single token into chunks of at most max_width cells.
 // Always produces at least one chunk even if a single grapheme is wider than max_width.
-// Chunks accumulate newest-first and are reversed once, so a long token (a CJK
-// paragraph is one token, it has no spaces) costs O(n), not O(n^2).
+//
+// Both the chunk list and the current chunk accumulate newest-first and are
+// reversed once, so a long token (a CJK paragraph is one token, it has no
+// spaces) costs O(n) rather than O(n^2) in list appends and string copies.
 fn hard_break_word(s: String, max_width: Int) -> List(String) {
-  hard_break_acc(string.to_graphemes(s), max_width, 0, "", [])
+  hard_break_acc(string.to_graphemes(s), max_width, 0, [], [])
 }
 
 fn hard_break_acc(
   gs: List(String),
   max_width: Int,
   curr_w: Int,
-  curr: String,
+  rev_curr: List(String),
   rev_acc: List(String),
 ) -> List(String) {
   case gs {
     [] ->
-      case curr {
-        "" -> list.reverse(rev_acc)
-        _ -> list.reverse([curr, ..rev_acc])
+      case rev_curr {
+        [] -> list.reverse(rev_acc)
+        _ -> list.reverse([join_rev(rev_curr), ..rev_acc])
       }
     [g, ..rest] -> {
       let gw = grapheme_cell_width(g)
       // Flush when adding g would exceed max_width (but always accept the first grapheme).
       case curr_w > 0 && curr_w + gw > max_width {
-        True -> hard_break_acc(rest, max_width, gw, g, [curr, ..rev_acc])
+        True ->
+          hard_break_acc(rest, max_width, gw, [g], [
+            join_rev(rev_curr),
+            ..rev_acc
+          ])
         False ->
-          hard_break_acc(rest, max_width, curr_w + gw, curr <> g, rev_acc)
+          hard_break_acc(rest, max_width, curr_w + gw, [g, ..rev_curr], rev_acc)
       }
     }
   }
+}
+
+fn join_rev(rev_pieces: List(String)) -> String {
+  string.concat(list.reverse(rev_pieces))
 }
 
 /// Pad right with spaces to reach `width` cells. Cell-aware.
