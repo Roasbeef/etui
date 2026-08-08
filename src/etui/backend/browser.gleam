@@ -25,8 +25,8 @@
 /// ```
 import etui/backend.{
   type Error, type InputEvent, type RenderOp, type TerminalSize, ClearScreen,
-  DisableMouse, EnableMouse, EnterAltScreen, ExitAltScreen, IOError, MoveCursor,
-  Resize, Write,
+  DisableBracketedPaste, DisableMouse, EnableBracketedPaste, EnableMouse,
+  EnterAltScreen, ExitAltScreen, IOError, MoveCursor, Resize, Write,
 }
 
 @target(javascript)
@@ -116,6 +116,8 @@ fn render_op_to_ansi(op: RenderOp) -> String {
     EnableMouse -> "\u{001B}[?1000h\u{001B}[?1002h\u{001B}[?1006h"
     DisableMouse ->
       "\u{001B}[?1007l\u{001B}[?1015l\u{001B}[?1006l\u{001B}[?1005l\u{001B}[?1003l\u{001B}[?1002l\u{001B}[?1000l"
+    EnableBracketedPaste -> "\u{001B}[?2004h"
+    DisableBracketedPaste -> "\u{001B}[?2004l"
   }
 }
 

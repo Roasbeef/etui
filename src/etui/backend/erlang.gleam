@@ -2,13 +2,12 @@
 /// Uses native Erlang modules for terminal control (inspired by Etch).
 import etui/backend.{
   type Error, type InputEvent, type RenderOp, type TerminalSize, ClearScreen,
-  DisableMouse, EnableMouse, EnterAltScreen, ExitAltScreen, IOError, MouseLeft,
-  MouseMiddle, MousePress, MouseRelease, MouseRight, MouseScroll, MoveCursor,
-  Write,
+  DisableBracketedPaste, DisableMouse, EnableBracketedPaste, EnableMouse,
+  EnterAltScreen, ExitAltScreen, IOError, MoveCursor, Write,
 }
+import etui/input
 import gleam/int
 import gleam/list
-import gleam/string
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -21,7 +20,32 @@ pub type ErlangTerminalState {
     mouse: Bool,
     /// Monotonic ms at the last `window_size_ffi` call. See `size_poll_ms`.
     last_size_check: Int,
+    /// Bytes read but not yet forming a complete escape sequence. Prepended
+    /// to the next read.
+    pending: String,
+    /// Events decoded but not yet handed to the app. One read can produce
+    /// many; `poll` returns one per call and keeps the rest here.
+    queue: List(InputEvent),
   )
+}
+
+/// What to turn on when the terminal is initialised.
+pub type Options {
+  Options(
+    /// Report mouse buttons, drags and the wheel as input events.
+    mouse: Bool,
+    /// Deliver pasted text as one `backend.Paste` event.
+    ///
+    /// Off by default: with it on, an app that does not handle `Paste` sees
+    /// nothing at all when the user pastes, which is worse than the mangled
+    /// key presses it sees today.
+    paste: Bool,
+  )
+}
+
+/// Mouse off, bracketed paste off.
+pub fn default_options() -> Options {
+  Options(mouse: False, paste: False)
 }
 
 /// Minimum gap between terminal-size queries while polling.
@@ -36,16 +60,21 @@ const size_poll_ms = 100
 // Backend construction
 
 pub fn new() -> backend.Backend(ErlangTerminalState) {
-  new_impl(False)
+  new_with_options(default_options())
 }
 
 pub fn new_with_mouse() -> backend.Backend(ErlangTerminalState) {
-  new_impl(True)
+  new_with_options(Options(..default_options(), mouse: True))
 }
 
-fn new_impl(mouse: Bool) -> backend.Backend(ErlangTerminalState) {
+/// Backend with an explicit feature set.
+///
+/// ```gleam
+/// erlang.new_with_options(erlang.Options(mouse: True, paste: True))
+/// ```
+pub fn new_with_options(opts: Options) -> backend.Backend(ErlangTerminalState) {
   backend.Backend(
-    init: fn() { init_terminal(mouse) },
+    init: fn() { init_terminal(opts) },
     render: render_ops,
     poll: poll_input,
     next_size: get_terminal_size,
@@ -123,17 +152,12 @@ fn write_cleanup_ffi() -> Nil {
 // Turning it off reclaims that column; `write_cleanup` turns it back on.
 const disable_autowrap = "\u{001B}[?7l"
 
-fn init_terminal(mouse: Bool) -> Result(ErlangTerminalState, Error) {
+fn init_terminal(opts: Options) -> Result(ErlangTerminalState, Error) {
   init_tty_state()
-  let init_ops = case mouse {
-    True -> [
-      EnterAltScreen,
-      Write(disable_autowrap),
-      ClearScreen,
-      EnableMouse,
-    ]
-    False -> [EnterAltScreen, Write(disable_autowrap), ClearScreen]
-  }
+  let init_ops =
+    [EnterAltScreen, Write(disable_autowrap), ClearScreen]
+    |> append_if(opts.mouse, EnableMouse)
+    |> append_if(opts.paste, EnableBracketedPaste)
   case write_ops_to_stdout(init_ops) {
     Ok(Nil) -> {
       enter_raw_ffi()
@@ -143,15 +167,26 @@ fn init_terminal(mouse: Bool) -> Result(ErlangTerminalState, Error) {
         Error(_) -> #(80, 24)
       }
       install_sigint_cleanup_ffi(fn() { terminal_cleanup() })
-      Ok(ErlangTerminalState(
-        raw_mode_active: True,
-        cols: cols,
-        rows: rows,
-        mouse: mouse,
-        last_size_check: monotonic_ms_ffi(),
-      ))
+      Ok(
+        ErlangTerminalState(
+          raw_mode_active: True,
+          cols: cols,
+          rows: rows,
+          mouse: opts.mouse,
+          last_size_check: monotonic_ms_ffi(),
+          pending: "",
+          queue: [],
+        ),
+      )
     }
     Error(reason) -> Error(IOError(reason))
+  }
+}
+
+fn append_if(ops: List(RenderOp), cond: Bool, op: RenderOp) -> List(RenderOp) {
+  case cond {
+    True -> list.append(ops, [op])
+    False -> ops
   }
 }
 
@@ -165,30 +200,68 @@ fn render_ops(
   }
 }
 
+/// Return the next input event.
+///
+/// One read can carry several key presses (typing faster than the frame rate,
+/// or a paste), and it can also stop in the middle of an escape sequence. The
+/// backend therefore decodes a read into a queue of events and hands them out
+/// one per call, keeping any trailing partial sequence in `pending` for the
+/// next read. Previously a whole read became a single `KeyPress`, so only the
+/// first key of a burst survived.
 fn poll_input(
   state: ErlangTerminalState,
   timeout_ms: Int,
 ) -> Result(#(InputEvent, ErlangTerminalState), Error) {
-  let input_event = case read_with_timeout_ffi(timeout_ms) {
-    Ok(input) -> parse_input(input)
-    Error(_) -> backend.Tick
+  case state.queue {
+    [event, ..rest] -> Ok(#(event, ErlangTerminalState(..state, queue: rest)))
+    [] -> {
+      let #(input_events, pending) = read_events(state, timeout_ms)
+      let #(sized, resize_events) = check_resize(state)
+      // Resize first: the app should lay out at the new size before it
+      // processes keys that were typed during the resize. Both are delivered,
+      // which is the point, the old code returned Resize *instead of* the key.
+      let next = ErlangTerminalState(..sized, pending: pending, queue: [])
+      case list.append(resize_events, input_events) {
+        [] -> Ok(#(backend.Tick, next))
+        [event, ..rest] ->
+          Ok(#(event, ErlangTerminalState(..next, queue: rest)))
+      }
+    }
   }
+}
+
+fn read_events(
+  state: ErlangTerminalState,
+  timeout_ms: Int,
+) -> #(List(InputEvent), String) {
+  case read_with_timeout_ffi(timeout_ms) {
+    Ok(chunk) -> {
+      let input.Parsed(events, pending) = input.parse(state.pending <> chunk)
+      #(events, pending)
+    }
+    // The read timed out, so nothing more is coming: a pending remainder is a
+    // real Escape press rather than the start of a sequence.
+    Error(_) -> #(input.flush(state.pending), "")
+  }
+}
+
+fn check_resize(
+  state: ErlangTerminalState,
+) -> #(ErlangTerminalState, List(InputEvent)) {
   let now = monotonic_ms_ffi()
   case now - state.last_size_check < size_poll_ms {
-    True -> Ok(#(input_event, state))
+    True -> #(state, [])
     False -> {
       let checked = ErlangTerminalState(..state, last_size_check: now)
       case window_size_ffi() {
         Ok(#(c, r)) ->
           case c == state.cols && r == state.rows {
-            True -> Ok(#(input_event, checked))
-            False ->
-              Ok(#(
-                backend.Resize(c, r),
-                ErlangTerminalState(..checked, cols: c, rows: r),
-              ))
+            True -> #(checked, [])
+            False -> #(ErlangTerminalState(..checked, cols: c, rows: r), [
+              backend.Resize(c, r),
+            ])
           }
-        Error(_) -> Ok(#(input_event, checked))
+        Error(_) -> #(checked, [])
       }
     }
   }
@@ -243,134 +316,15 @@ fn render_op_to_string(op: RenderOp) -> String {
     ClearScreen -> "\u{001B}[2J\u{001B}[H"
     EnterAltScreen -> "\u{001B}[?1049h"
     ExitAltScreen -> "\u{001B}[?1049l"
-    // Enable SGR extended mouse tracking (button + scroll events).
-    EnableMouse -> "\u{001B}[?1000h\u{001B}[?1006h"
+    // Button-event tracking (1002) rather than plain click tracking (1000):
+    // it reports motion while a button is held, which is what makes MouseDrag
+    // possible. 1006 is the SGR encoding, which lifts the 223-column limit.
+    EnableMouse -> "\u{001B}[?1002h\u{001B}[?1006h"
     // Clear all common xterm mouse/alt-scroll modes so the shell does not
     // inherit wheel/click reporting after the app exits.
     DisableMouse ->
       "\u{001B}[?1007l\u{001B}[?1015l\u{001B}[?1006l\u{001B}[?1005l\u{001B}[?1003l\u{001B}[?1002l\u{001B}[?1000l"
-  }
-}
-
-// Parse a raw terminal input string into an InputEvent.
-// Normalises escape sequences to friendly key names so keys.match/1 works.
-fn parse_input(input: String) -> InputEvent {
-  case input {
-    "" -> backend.Tick
-    // SGR mouse: \e[<Cb;Cx;CyM (press) or \e[<Cb;Cx;Cym (release)
-    _ ->
-      case string.starts_with(input, "\u{001B}[<") {
-        True -> parse_sgr_mouse(string.drop_start(input, 3))
-        False -> backend.KeyPress(normalise_key(input))
-      }
-  }
-}
-
-// Map raw terminal byte sequences to friendly key name strings.
-// These match the constants expected by keys.match/1 in keys.gleam.
-fn normalise_key(raw: String) -> String {
-  case raw {
-    // ── Arrow keys ─────────────────────────────────────────────
-    "\u{001B}[A" | "\u{001B}OA" -> "up"
-    "\u{001B}[B" | "\u{001B}OB" -> "down"
-    "\u{001B}[C" | "\u{001B}OC" -> "right"
-    "\u{001B}[D" | "\u{001B}OD" -> "left"
-    // ── Enter / newline ────────────────────────────────────────
-    "\r" | "\n" -> "enter"
-    // ── Backspace / Delete ─────────────────────────────────────
-    "\u{007F}" | "\u{0008}" -> "backspace"
-    "\u{001B}[3~" -> "delete"
-    // ── Tab / Shift-Tab ────────────────────────────────────────
-    "\t" -> "tab"
-    "\u{001B}[Z" -> "backtab"
-    // ── Escape (lone) ──────────────────────────────────────────
-    "\u{001B}" -> "esc"
-    // ── Insert / Page / Home / End ─────────────────────────────
-    "\u{001B}[2~" -> "insert"
-    "\u{001B}[5~" -> "pageup"
-    "\u{001B}[6~" -> "pagedown"
-    "\u{001B}[H" | "\u{001B}OH" | "\u{001B}[1~" -> "home"
-    "\u{001B}[F" | "\u{001B}OF" | "\u{001B}[4~" -> "end"
-    // ── Function keys (xterm VT220 + SS3 variants) ─────────────
-    "\u{001B}[11~" | "\u{001B}OP" -> "f1"
-    "\u{001B}[12~" | "\u{001B}OQ" -> "f2"
-    "\u{001B}[13~" | "\u{001B}OR" -> "f3"
-    "\u{001B}[14~" | "\u{001B}OS" -> "f4"
-    "\u{001B}[15~" -> "f5"
-    "\u{001B}[17~" -> "f6"
-    "\u{001B}[18~" -> "f7"
-    "\u{001B}[19~" -> "f8"
-    "\u{001B}[20~" -> "f9"
-    "\u{001B}[21~" -> "f10"
-    "\u{001B}[23~" -> "f11"
-    "\u{001B}[24~" -> "f12"
-    // ── Ctrl+letter: codepoints 0x01–0x1A (a–z) ───────────────
-    "\u{0001}" -> "ctrl+a"
-    "\u{0002}" -> "ctrl+b"
-    "\u{0003}" -> "ctrl+c"
-    "\u{0004}" -> "ctrl+d"
-    "\u{0005}" -> "ctrl+e"
-    "\u{0006}" -> "ctrl+f"
-    "\u{0007}" -> "ctrl+g"
-    "\u{000B}" -> "ctrl+k"
-    "\u{000C}" -> "ctrl+l"
-    "\u{000E}" -> "ctrl+n"
-    "\u{000F}" -> "ctrl+o"
-    "\u{0010}" -> "ctrl+p"
-    "\u{0011}" -> "ctrl+q"
-    "\u{0012}" -> "ctrl+r"
-    "\u{0013}" -> "ctrl+s"
-    "\u{0014}" -> "ctrl+t"
-    "\u{0015}" -> "ctrl+u"
-    "\u{0016}" -> "ctrl+v"
-    "\u{0017}" -> "ctrl+w"
-    "\u{0018}" -> "ctrl+x"
-    "\u{0019}" -> "ctrl+y"
-    "\u{001A}" -> "ctrl+z"
-    // ── Alt+letter: ESC followed by a single printable char ────
-    s ->
-      case string.starts_with(s, "\u{001B}") && string.length(s) == 2 {
-        True -> "alt+" <> string.drop_start(s, 1)
-        False -> s
-      }
-  }
-}
-
-// Parse the payload after "\e[<": "Cb;Cx;CyM" or "Cb;Cx;Cym"
-fn parse_sgr_mouse(payload: String) -> InputEvent {
-  let is_press = string.ends_with(payload, "M")
-  let trimmed = case is_press {
-    True -> string.drop_end(payload, 1)
-    False -> string.drop_end(payload, 1)
-  }
-  case string.split(trimmed, ";") {
-    [cb_str, cx_str, cy_str] ->
-      case int.parse(cb_str), int.parse(cx_str), int.parse(cy_str) {
-        Ok(cb), Ok(cx), Ok(cy) -> {
-          // Coordinates are 1-based in SGR; convert to 0-based.
-          let x = cx - 1
-          let y = cy - 1
-          case cb {
-            // Scroll events (button code 64 = up, 65 = down)
-            64 -> MouseScroll(x, y, True)
-            65 -> MouseScroll(x, y, False)
-            // Button press / release
-            _ -> {
-              let btn = case cb % 4 {
-                0 -> MouseLeft
-                1 -> MouseMiddle
-                2 -> MouseRight
-                _ -> MouseLeft
-              }
-              case is_press {
-                True -> MousePress(x, y, btn)
-                False -> MouseRelease(x, y, btn)
-              }
-            }
-          }
-        }
-        _, _, _ -> backend.KeyPress("\u{001B}[<" <> payload)
-      }
-    _ -> backend.KeyPress("\u{001B}[<" <> payload)
+    EnableBracketedPaste -> "\u{001B}[?2004h"
+    DisableBracketedPaste -> "\u{001B}[?2004l"
   }
 }
