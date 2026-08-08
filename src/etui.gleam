@@ -27,7 +27,8 @@
 ///
 /// | Module | Purpose |
 /// |--------|---------|
-/// | `etui/app` | Application event loop (`run`, `run_buffered`, `run_animated`, `run_buffered_cursor`) |
+/// | `etui/app` | Application event loops (`run`, `run_buffered`, `run_animated`, `run_buffered_cursor`) |
+/// | `etui/terminal` | Drive rendering from your own loop (`new`, `draw`, `poll`, `restore`) |
 /// | `etui/backend` | Terminal event types and render ops |
 /// | `etui/backend/default` | Platform-selecting backend (`new()` works on Erlang and JS) |
 /// | `etui/buffer` | Cell grid storage, Unicode-aware rendering, diff output |
