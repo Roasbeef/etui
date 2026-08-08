@@ -8,10 +8,15 @@ pub type RenderOp {
   ClearScreen
   EnterAltScreen
   ExitAltScreen
-  /// Enable SGR mouse tracking (button + scroll events, pixel-precise coords).
+  /// Enable SGR mouse tracking (button, drag and scroll events).
   EnableMouse
   /// Disable all mouse tracking.
   DisableMouse
+  /// Enable bracketed paste, so pasted text arrives as one `Paste` event
+  /// instead of as one key press per character.
+  EnableBracketedPaste
+  /// Disable bracketed paste.
+  DisableBracketedPaste
 }
 
 /// Mouse button identifier.
@@ -31,6 +36,14 @@ pub type InputEvent {
   MouseRelease(x: Int, y: Int, button: MouseButton)
   /// Mouse wheel scrolled. `up: True` = scroll up, `False` = scroll down.
   MouseScroll(x: Int, y: Int, up: Bool)
+  /// Mouse moved with a button held down.
+  MouseDrag(x: Int, y: Int, button: MouseButton)
+  /// Mouse moved with no button held. Only reported when the backend enables
+  /// motion tracking.
+  MouseMove(x: Int, y: Int)
+  /// Text pasted via bracketed paste, delivered as one event rather than as
+  /// hundreds of key presses. Requires a backend that enables bracketed paste.
+  Paste(text: String)
 }
 
 pub type TerminalSize {

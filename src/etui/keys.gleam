@@ -102,9 +102,14 @@ pub fn match(raw: String) -> Key {
           case string.starts_with(raw, "alt+") {
             True -> Alt(string.drop_start(raw, 4))
             False ->
-              case string.length(raw) > 0 {
-                True -> Char(raw)
-                False -> Unknown(raw)
+              // Only a single grapheme is a character. Modified keys such as
+              // "shift+left" or "ctrl+shift+down" have no `Key` of their own,
+              // and calling them `Char` would hand widgets a ten-grapheme
+              // "character" to insert into a text field. Match the raw string
+              // from `backend.KeyPress` directly to handle them.
+              case string.to_graphemes(raw) {
+                [_] -> Char(raw)
+                _ -> Unknown(raw)
               }
           }
       }
