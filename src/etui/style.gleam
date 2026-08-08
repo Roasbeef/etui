@@ -63,6 +63,18 @@ pub fn strikethrough() -> Modifier {
   Modifier(64)
 }
 
+/// Hidden text: the terminal reserves the cells but draws nothing (SGR 8).
+/// Useful for password fields that must keep their layout.
+pub fn hidden() -> Modifier {
+  Modifier(128)
+}
+
+/// Rapid blink (SGR 6). Support is rarer than `blink`, which is SGR 5; a
+/// terminal that does not know it usually falls back to the slow one.
+pub fn rapid_blink() -> Modifier {
+  Modifier(256)
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Modifier operations
 
@@ -95,13 +107,22 @@ pub fn modifier_equal(a: Modifier, b: Modifier) -> Bool {
 // Composite style
 
 /// Combined foreground color, background color, and text modifiers.
+///
+/// A style carries modifiers it turns *on* (`modifier`) and modifiers it turns
+/// *off* (`sub_modifier`). The second exists so a style can be laid over
+/// another and take something away: a theme that sets bold everywhere and one
+/// widget that must not be bold is otherwise impossible to express, because an
+/// empty `modifier` in the overlay means "change nothing", not "clear".
+///
+/// Build with `add_modifier` and `remove_modifier` rather than setting the two
+/// fields directly; they keep the pair consistent.
 pub type Style {
-  Style(fg: Color, bg: Color, modifier: Modifier)
+  Style(fg: Color, bg: Color, modifier: Modifier, sub_modifier: Modifier)
 }
 
 /// Default style: terminal colors, no modifiers.
 pub fn default_style() -> Style {
-  Style(fg: Default, bg: Default, modifier: none())
+  Style(fg: Default, bg: Default, modifier: none(), sub_modifier: none())
 }
 
 /// Set foreground color on a style.
@@ -121,37 +142,46 @@ pub fn with_modifier(s: Style, m: Modifier) -> Style {
 
 /// Default colors with bold modifier.
 pub fn bold_style() -> Style {
-  Style(fg: Default, bg: Default, modifier: bold())
+  Style(fg: Default, bg: Default, modifier: bold(), sub_modifier: none())
 }
 
 /// Default colors with reverse modifier (swap fg/bg).
 pub fn reversed() -> Style {
-  Style(fg: Default, bg: Default, modifier: reverse())
+  Style(fg: Default, bg: Default, modifier: reverse(), sub_modifier: none())
 }
 
 /// Default colors with italic modifier.
 pub fn italic_style() -> Style {
-  Style(fg: Default, bg: Default, modifier: italic())
+  Style(fg: Default, bg: Default, modifier: italic(), sub_modifier: none())
 }
 
 /// Default colors with dim modifier.
 pub fn dim_style() -> Style {
-  Style(fg: Default, bg: Default, modifier: dim())
+  Style(fg: Default, bg: Default, modifier: dim(), sub_modifier: none())
 }
 
 /// Default colors with underline modifier.
 pub fn underline_style() -> Style {
-  Style(fg: Default, bg: Default, modifier: underline())
+  Style(fg: Default, bg: Default, modifier: underline(), sub_modifier: none())
 }
 
-/// Add a modifier to a `Style` (bitwise OR).
+/// Turn modifiers on. Anything named here stops being turned off.
 pub fn add_modifier(s: Style, m: Modifier) -> Style {
-  Style(..s, modifier: add(s.modifier, m))
+  Style(
+    ..s,
+    modifier: add(s.modifier, m),
+    sub_modifier: remove(s.sub_modifier, m),
+  )
 }
 
-/// Remove modifier bits from a `Style`.
+/// Turn modifiers off, including ones a style underneath had turned on.
+/// Anything named here stops being turned on.
 pub fn remove_modifier(s: Style, m: Modifier) -> Style {
-  Style(..s, modifier: remove(s.modifier, m))
+  Style(
+    ..s,
+    modifier: remove(s.modifier, m),
+    sub_modifier: add(s.sub_modifier, m),
+  )
 }
 
 /// Parse an RGB color from a hex string (`"#RRGGBB"` or `"RRGGBB"`).
@@ -211,9 +241,17 @@ fn hex_digit(c: String) -> Result(Int, Nil) {
   }
 }
 
-/// Apply `over` on top of `base`. Default fg/bg fall back to `base`.
-/// Modifier: if `over` has any bits set, they are OR'd into `base`;
-/// `none()` in `over` means "no modifier override" (keep base).
+/// Apply `over` on top of `base`.
+///
+/// `Default` colours in `over` fall through to `base`. Modifiers that `over`
+/// turns on are added, and modifiers it turns off are taken away, so an
+/// overlay can clear something the base had set:
+///
+/// ```gleam
+/// let theme = style.default_style() |> style.add_modifier(style.bold())
+/// let quiet = style.default_style() |> style.remove_modifier(style.bold())
+/// style.patch(theme, quiet)  // not bold
+/// ```
 pub fn patch(base: Style, over: Style) -> Style {
   let fg = case over.fg {
     Default -> base.fg
@@ -223,11 +261,16 @@ pub fn patch(base: Style, over: Style) -> Style {
     Default -> base.bg
     c -> c
   }
-  let modifier = case is_none(over.modifier) {
-    True -> base.modifier
-    False -> add(base.modifier, over.modifier)
-  }
-  Style(fg: fg, bg: bg, modifier: modifier)
+  Style(
+    fg: fg,
+    bg: bg,
+    modifier: base.modifier
+      |> remove(over.sub_modifier)
+      |> add(over.modifier),
+    sub_modifier: base.sub_modifier
+      |> remove(over.modifier)
+      |> add(over.sub_modifier),
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -329,6 +372,14 @@ pub fn ansi_modifier(m: Modifier) -> String {
       }
       let parts = case has(m, strikethrough()) {
         True -> ["9", ..parts]
+        False -> parts
+      }
+      let parts = case has(m, hidden()) {
+        True -> ["8", ..parts]
+        False -> parts
+      }
+      let parts = case has(m, rapid_blink()) {
+        True -> ["6", ..parts]
         False -> parts
       }
       "\u{001B}[" <> string.join(parts, ";") <> "m"

@@ -141,6 +141,7 @@ pub fn tree_new(roots: List(TreeNode)) -> TreeWidget {
       fg: style.Default,
       bg: style.Default,
       modifier: style.reverse(),
+      sub_modifier: style.none(),
     ),
     glyphs: default_glyphs(),
   )

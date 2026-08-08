@@ -79,6 +79,7 @@ pub fn textarea_new() -> TextArea {
       fg: style.Default,
       bg: style.Default,
       modifier: style.reverse(),
+      sub_modifier: style.none(),
     ),
   )
 }

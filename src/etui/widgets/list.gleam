@@ -40,6 +40,7 @@ pub fn list_new(items: List(String)) -> ListWidget {
       fg: style.Default,
       bg: style.Default,
       modifier: style.reverse(),
+      sub_modifier: style.none(),
     ),
     blink_period: 0,
   )
@@ -62,6 +63,7 @@ pub fn list_new_styled(items: List(span.Line)) -> ListWidget {
       fg: style.Default,
       bg: style.Default,
       modifier: style.reverse(),
+      sub_modifier: style.none(),
     ),
     blink_period: 0,
   )

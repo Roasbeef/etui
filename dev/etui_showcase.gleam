@@ -666,6 +666,7 @@ fn render_list(m: Model) -> buffer.Buffer {
       fg: c_cyan,
       bg: style.Indexed(235),
       modifier: style.none(),
+      sub_modifier: style.none(),
     ))
   let buf = list_w.render_stateful(buf, list_inner, pkg_lw, m.pkg_list_st)
 
@@ -715,6 +716,7 @@ fn render_list(m: Model) -> buffer.Buffer {
       fg: c_cyan,
       bg: style.Indexed(235),
       modifier: style.none(),
+      sub_modifier: style.none(),
     ))
   let buf = table.render_stateful(buf, tbl_inner, tbl, m.pkg_table_st)
 
@@ -760,6 +762,7 @@ fn render_tree(m: Model) -> buffer.Buffer {
       fg: c_cyan,
       bg: style.Indexed(235),
       modifier: style.none(),
+      sub_modifier: style.none(),
     ))
   let buf = tree.render(buf, tree_inner, tw, m.tree_st)
 
@@ -1036,6 +1039,7 @@ fn draw_dialog(buf: buffer.Buffer, m: Model) -> buffer.Buffer {
           fg: style.Default,
           bg: style.Indexed(235),
           modifier: style.bold(),
+          sub_modifier: style.none(),
         ))
       dlg_w.render(buf, screen, d, m.dlg_st)
     }

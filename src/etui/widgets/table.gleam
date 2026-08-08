@@ -64,6 +64,7 @@ pub fn table_new(rows: List(List(String))) -> TableWidget {
       fg: style.Default,
       bg: style.Default,
       modifier: style.reverse(),
+      sub_modifier: style.none(),
     ),
     blink_period: 0,
   )

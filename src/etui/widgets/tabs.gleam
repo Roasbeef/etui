@@ -38,6 +38,7 @@ pub fn tabs_new(labels: List(String)) -> Tabs {
       fg: style.Default,
       bg: style.Default,
       modifier: style.add(style.bold(), style.reverse()),
+      sub_modifier: style.none(),
     ),
     divider: "│",
     padding: 1,

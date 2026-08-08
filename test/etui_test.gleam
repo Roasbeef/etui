@@ -839,7 +839,12 @@ pub fn list_scroll_into_view_up_test() {
 pub fn list_highlight_style_test() {
   let items = ["Item 1", "Item 2"]
   let s =
-    style.Style(fg: style.Default, bg: style.Default, modifier: style.bold())
+    style.Style(
+      fg: style.Default,
+      bg: style.Default,
+      modifier: style.bold(),
+      sub_modifier: style.none(),
+    )
   let l =
     glist_widget.list_new(items)
     |> glist_widget.with_highlight_style(s)
@@ -853,6 +858,7 @@ pub fn table_highlight_style_test() {
       fg: style.Default,
       bg: style.Default,
       modifier: style.add(style.bold(), style.reverse()),
+      sub_modifier: style.none(),
     )
   let t =
     gtable_widget.table_new(rows)
@@ -895,9 +901,15 @@ pub fn style_patch_test() {
       fg: style.Indexed(1),
       bg: style.Indexed(2),
       modifier: style.bold(),
+      sub_modifier: style.none(),
     )
   let over =
-    style.Style(fg: style.Default, bg: style.Indexed(3), modifier: style.none())
+    style.Style(
+      fg: style.Default,
+      bg: style.Indexed(3),
+      modifier: style.none(),
+      sub_modifier: style.none(),
+    )
   let result = style.patch(base, over)
   result.fg |> should.equal(style.Indexed(1))
   result.bg |> should.equal(style.Indexed(3))
@@ -2329,6 +2341,7 @@ pub fn style_remove_modifier_test() {
       fg: style.Default,
       bg: style.Default,
       modifier: style.add(style.bold(), style.italic()),
+      sub_modifier: style.none(),
     )
     |> style.remove_modifier(style.bold())
   style.has(s.modifier, style.bold()) |> should.equal(False)

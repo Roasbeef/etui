@@ -78,16 +78,19 @@ pub fn dialog_new(message: String) -> Dialog {
       fg: style.Default,
       bg: style.Default,
       modifier: style.none(),
+      sub_modifier: style.none(),
     ),
     cancel_style: style.Style(
       fg: style.Default,
       bg: style.Default,
       modifier: style.none(),
+      sub_modifier: style.none(),
     ),
     focused_style: style.Style(
       fg: style.Default,
       bg: style.Default,
       modifier: style.reverse(),
+      sub_modifier: style.none(),
     ),
     border: block.Rounded,
   )

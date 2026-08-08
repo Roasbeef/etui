@@ -174,6 +174,7 @@ fn make_tree_widget(roots: List(tree.TreeNode)) -> tree.TreeWidget {
     fg: style.Indexed(15),
     bg: style.Indexed(4),
     modifier: style.bold(),
+    sub_modifier: style.none(),
   ))
 }
 
@@ -426,6 +427,7 @@ fn render(m: Model, screen: Rect) -> #(buffer.Buffer, Result(Position, Nil)) {
       fg: style.Indexed(0),
       bg: style.Rgb(80, 140, 220),
       modifier: style.none(),
+      sub_modifier: style.none(),
     ))
   let visible_h = text_area.size.height
   let scroll = ta.effective_offset(m.editor_state, visible_h)
@@ -481,6 +483,7 @@ fn render(m: Model, screen: Rect) -> #(buffer.Buffer, Result(Position, Nil)) {
         False -> style.Rgb(100, 100, 100)
       },
       modifier: style.bold(),
+      sub_modifier: style.none(),
     ))
   let buf = multi_select.render(buf, multi_area, multi_w, m.multi_state)
 

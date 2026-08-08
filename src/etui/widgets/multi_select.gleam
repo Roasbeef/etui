@@ -41,11 +41,13 @@ pub fn multi_select_new(items: List(String)) -> MultiSelectWidget {
       fg: style.Default,
       bg: style.Default,
       modifier: style.reverse(),
+      sub_modifier: style.none(),
     ),
     selected_style: style.Style(
       fg: style.Default,
       bg: style.Default,
       modifier: style.bold(),
+      sub_modifier: style.none(),
     ),
     checked_mark: "[x] ",
     unchecked_mark: "[ ] ",
