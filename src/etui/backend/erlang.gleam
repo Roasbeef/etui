@@ -29,8 +29,8 @@ pub type ErlangTerminalState {
 /// `io:columns/0` is a synchronous round-trip to the group leader, which is
 /// the same process serving the keyboard reader. Asking once per frame put it
 /// in contention with input and dropped keystrokes. A resize is a human-scale
-/// event, so noticing it up to 200 ms late costs nothing.
-const size_poll_ms = 200
+/// event, so noticing it up to 100 ms late costs nothing.
+const size_poll_ms = 100
 
 // ─────────────────────────────────────────────────────────────────
 // Backend construction

@@ -23,5 +23,10 @@ jobs:
           node-version: "22"
       - run: gleam deps download
       - run: gleam test
+      # The suite has to run on JavaScript too, not just the smoke app. Several
+      # buffer paths are native on Erlang and fall back to the Gleam body on
+      # JavaScript, and the two silently disagreed about non-ASCII input until
+      # someone ran the tests on both.
+      - run: gleam test --target javascript
       - run: gleam format --check src test dev
       - run: gleam run --target javascript -m etui_js_smoke

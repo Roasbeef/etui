@@ -2,6 +2,55 @@
 
 All notable changes to étui are listed here.
 
+## Unreleased
+
+Work towards ratatui-level layout and composition flexibility. Nothing in this
+section breaks an existing API.
+
+### Added
+
+- **`buffer.blit/4`:** copy a window of one buffer into another, clipped
+  against both. Composite an off-screen canvas or a cached panel into the frame
+  without walking cells from the caller.
+- **`buffer.set_style/3`:** repaint a rect without touching cell content.
+- **`geometry.Margin`, `inner/2`, `offset/3`, `clamp/2`, `size/1`, `rows/1`,
+  `columns/1`:** the rect helpers ratatui exposes on `Rect`. `inner/2` follows
+  ratatui's saturation rule.
+- **`text.normalise_newlines/1` and `text.expand_tabs/2`:** exposed so callers
+  that do their own wrapping can apply the same normalisation, and so tab width
+  can be chosen per call site.
+
+### Fixed
+
+- **`\r` corrupted every position after it:** `text.wrap` split on `\n` only,
+  leaving a bare `\r` in the output. It measures zero cells, so the rest of the
+  line drew one column to the left. `\r\n` and lone `\r` are now normalised.
+- **Tabs were silently deleted:** a tab measured 0 cells and the fill FFI drops
+  control characters, so `"a\tb"` reached the buffer as `"ab"`. `text.wrap` now
+  expands tabs to 8-column tab stops.
+- **Non-ASCII text vanished from `buffer_new_filled` on Erlang:** the native
+  `fill_all_rows` path consumed non-ASCII bytes without emitting a cell, so a
+  filled row lost every CJK and emoji character. The JavaScript fallback was
+  correct, which is how the two targets came to disagree.
+- **Wide graphemes broke at clip boundaries:** a window that started on the
+  right half of a wide grapheme, or ended on its left half, copied an orphan.
+  An orphan continuation renders as nothing and shifts the row left; an orphan
+  wide cell draws over its neighbour. `buffer.blit` and both fill paths now
+  blank the half that cannot be drawn whole.
+- **The last terminal column was unusable:** auto-wrap made writing the
+  bottom-right cell scroll the screen, so the backend reserved a column.
+  DECAWM is now disabled for the session and restored on exit.
+- **Terminal size was queried once per frame:** `io:columns/0` is a synchronous
+  round-trip to the group leader that also serves the keyboard reader, putting
+  the two in contention. Queries are throttled to 100 ms.
+
+### Changed
+
+- **`text.wrap` and `buffer.clear` are O(n):** both had quadratic accumulation
+  (list appends, string copies) in their inner loops.
+- **CI runs the suite on JavaScript as well as Erlang.** Only a smoke app ran
+  there before, which is why the two targets could diverge unnoticed.
+
 ## 1.0.1 - 2026-06-06
 
 ### Fixed
