@@ -74,9 +74,16 @@ pub fn inner_shrinks_on_all_sides_test() {
   |> should.equal(Rect(Position(3, 5), Size(8, 2)))
 }
 
-pub fn inner_collapses_instead_of_going_negative_test() {
-  geometry.inner(geometry.rect_new(0, 0, 2, 2), Margin(5, 5)).size
-  |> should.equal(Size(0, 0))
+pub fn inner_saturates_at_zero_keeping_the_shifted_origin_test() {
+  // ratatui's Rect::inner semantics: the origin moves in unconditionally and
+  // only the size saturates.
+  geometry.inner(geometry.rect_new(0, 0, 2, 2), Margin(5, 5))
+  |> should.equal(Rect(Position(5, 5), Size(0, 0)))
+}
+
+pub fn inner_of_a_long_token_is_still_a_rect_test() {
+  geometry.inner(geometry.rect_new(0, 0, 10, 1), Margin(0, 3)).size
+  |> should.equal(Size(10, 0))
 }
 
 pub fn offset_moves_without_resizing_test() {

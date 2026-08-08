@@ -130,8 +130,12 @@ pub type Margin {
   Margin(horizontal: Int, vertical: Int)
 }
 
-/// Shrink a rect by `margin` on all four sides. Collapses to a zero-size rect
-/// (at the centre) rather than going negative.
+/// Shrink a rect by `margin` on all four sides.
+///
+/// Matches ratatui's `Rect::inner`: the origin always moves in by the margin,
+/// and the size saturates at zero when the rect is too small to hold it. The
+/// result can therefore sit outside the original rect once it has collapsed,
+/// which is the behaviour callers ported from ratatui expect.
 ///
 /// ```gleam
 /// geometry.inner(area, geometry.Margin(1, 1))  // one cell of padding
@@ -139,24 +143,13 @@ pub type Margin {
 pub fn inner(rect: Rect, margin: Margin) -> Rect {
   let h = int.max(0, margin.horizontal)
   let v = int.max(0, margin.vertical)
-  case rect.size.width < 2 * h || rect.size.height < 2 * v {
-    True ->
-      Rect(
-        position: Position(
-          x: rect.position.x + rect.size.width / 2,
-          y: rect.position.y + rect.size.height / 2,
-        ),
-        size: Size(width: 0, height: 0),
-      )
-    False ->
-      Rect(
-        position: Position(x: rect.position.x + h, y: rect.position.y + v),
-        size: Size(
-          width: rect.size.width - 2 * h,
-          height: rect.size.height - 2 * v,
-        ),
-      )
-  }
+  Rect(
+    position: Position(x: rect.position.x + h, y: rect.position.y + v),
+    size: Size(
+      width: int.max(0, rect.size.width - 2 * h),
+      height: int.max(0, rect.size.height - 2 * v),
+    ),
+  )
 }
 
 /// Translate a rect by `dx`, `dy`. Size is unchanged.
