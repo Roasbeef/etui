@@ -2,12 +2,42 @@
 
 All notable changes to étui are listed here.
 
-## Unreleased
+## 1.1.0 - unreleased
 
-Work towards ratatui-level layout and composition flexibility. Nothing in this
-section breaks an existing API.
+Work towards ratatui-level flexibility, in two parts: layout and composition
+primitives, then a real input parser.
+
+### Breaking
+
+Small, but they will not compile silently:
+
+- **`backend.InputEvent` gained `MouseDrag`, `MouseMove` and `Paste`**, and
+  **`backend.RenderOp` gained `EnableBracketedPaste` and
+  `DisableBracketedPaste`**. A `case` over either that was exhaustive without a
+  `_ ->` arm now fails to compile. Adding the arm is the whole fix.
+- **`keys.match` answers `Unknown` rather than `Char` for a multi-grapheme
+  string.** With modified keys now reaching the app, `"shift+left"` would have
+  arrived at a text field as a ten-grapheme "character" to insert. Single
+  graphemes are still `Char`, so ordinary typing is unaffected.
 
 ### Added
+
+- **`etui/input`:** incremental terminal input parsing, pure and testable
+  without a TTY. `parse` returns every event it can decode plus the bytes that
+  do not yet form a complete sequence; `flush` resolves a leftover into Escape
+  once a read times out.
+- **Modified keys:** ctrl, alt and shift on arrows, navigation and function
+  keys, named in a fixed order (`"ctrl+shift+left"`). These previously reached
+  the app as raw escape text.
+- **`backend.Paste`:** pasted text as one event. Opt in with
+  `erlang.new_with_options(erlang.Options(mouse: False, paste: True))`. It is
+  off by default because an app that ignores `Paste` would see nothing at all
+  when the user pastes.
+- **`backend.MouseDrag` and `backend.MouseMove`,** with mouse tracking raised
+  from click reporting (1000) to button-event reporting (1002) so drags are
+  actually reported.
+- **`erlang.new_with_options` and `erlang.Options`.** `new` and
+  `new_with_mouse` are unchanged.
 
 - **`buffer.blit/4`:** copy a window of one buffer into another, clipped
   against both. Composite an off-screen canvas or a cached panel into the frame
@@ -22,6 +52,15 @@ section breaks an existing API.
 
 ### Fixed
 
+- **Keys were dropped when typing fast or pasting:** the backend turned an
+  entire read into one `KeyPress`, so everything after the first key in a
+  buffered read was lost, and a sequence split across two reads was mangled.
+  Reads are now decoded into a queue and delivered one event at a time.
+- **A resize ate the keystroke that arrived with it:** the poll returned
+  `Resize` *instead of* the input event. Both are queued now.
+- **Dragging the mouse looked like a stream of clicks:** the SGR decoder
+  ignored the motion bit. Scrolling with a modifier held (button code 68 and
+  up) was also reported as a button press.
 - **`\r` corrupted every position after it:** `text.wrap` split on `\n` only,
   leaving a bare `\r` in the output. It measures zero cells, so the rest of the
   line drew one column to the left. `\r\n` and lone `\r` are now normalised.
