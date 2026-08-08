@@ -1184,19 +1184,23 @@ fn handle_list(k: keys.Key, m: Model) -> Model {
       )
     keys.Char("h") | keys.Left -> Model(..m, list_focus: FocusList)
     keys.Char("l") | keys.Right -> Model(..m, list_focus: FocusTable)
+    // Only the focused pane scrolls. Moving both at once made the focus
+    // indicator meaningless and the two selections drift apart as soon as one
+    // hit an end.
     keys.Down | keys.Char("j") ->
-      Model(
-        ..m,
-        pkg_list_st: list_w.select_next(m.pkg_list_st, n),
-        // +1 row offset because row 0 is the header
-        pkg_table_st: table.select_next_row(m.pkg_table_st, n + 1),
-      )
+      case m.list_focus {
+        FocusList ->
+          Model(..m, pkg_list_st: list_w.select_next(m.pkg_list_st, n))
+        // +1 row because row 0 of the table is the header
+        FocusTable ->
+          Model(..m, pkg_table_st: table.select_next_row(m.pkg_table_st, n + 1))
+      }
     keys.Up | keys.Char("k") ->
-      Model(
-        ..m,
-        pkg_list_st: list_w.select_prev(m.pkg_list_st),
-        pkg_table_st: table.select_prev_row(m.pkg_table_st),
-      )
+      case m.list_focus {
+        FocusList -> Model(..m, pkg_list_st: list_w.select_prev(m.pkg_list_st))
+        FocusTable ->
+          Model(..m, pkg_table_st: table.select_prev_row(m.pkg_table_st))
+      }
     _ -> m
   }
 }

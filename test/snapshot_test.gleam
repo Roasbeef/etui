@@ -707,14 +707,32 @@ pub fn scrollbar_vertical_thumb_at_bottom_test() {
   |> should.equal("░\n░\n░\n█")
 }
 
-pub fn scrollbar_fully_visible_is_all_thumb_test() {
-  // visible >= total → thumb fills entire track
+pub fn scrollbar_fully_visible_draws_nothing_test() {
+  // visible >= total → nothing to scroll. A full-track thumb told the reader
+  // nothing and painted over the panel border underneath, so the scrollbar
+  // leaves the column exactly as the caller drew it.
   let area = rect_new(0, 0, 1, 4)
   let s = scrollbar.scrollbar_new(4, 4, 0) |> scrollbar.with_arrows("", "")
   buffer.buffer_new(area)
   |> scrollbar.render_vertical(area, s)
   |> buf_str
-  |> should.equal("█\n█\n█\n█")
+  |> should.equal(" \n \n \n ")
+}
+
+pub fn scrollbar_fully_visible_keeps_existing_content_test() {
+  let area = rect_new(0, 0, 1, 2)
+  let s = scrollbar.scrollbar_new(2, 8, 0)
+  buffer.buffer_new(area)
+  |> buffer.set_string(
+    geometry.Position(0, 0),
+    "│",
+    style.Default,
+    style.Default,
+    style.none(),
+  )
+  |> scrollbar.render_vertical(area, s)
+  |> buf_str
+  |> should.equal("│\n ")
 }
 
 pub fn scrollbar_zero_area_noop_test() {

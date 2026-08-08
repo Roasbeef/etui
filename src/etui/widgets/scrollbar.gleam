@@ -92,15 +92,25 @@ pub fn with_thumb_colors(
 // ─────────────────────────────────────────────────────────────────
 // Rendering
 
+// Nothing scrolls when everything fits. A thumb spanning the whole track
+// carries no information and paints over whatever the caller drew in that
+// column, usually a panel border, so the scrollbar draws nothing at all.
+fn is_scrollable(s: Scrollbar) -> Bool {
+  s.total > s.visible
+}
+
 /// Render a vertical scrollbar into the first column of `area`.
 /// Arrow characters (if non-empty) occupy the top and bottom cells;
 /// the track fills the remaining height.
+///
+/// Draws nothing when `total <= visible`: there is nothing to scroll, so the
+/// column is left as the caller drew it.
 pub fn render_vertical(
   buf: buffer.Buffer,
   area: geometry.Rect,
   s: Scrollbar,
 ) -> buffer.Buffer {
-  case area.size.height <= 0 || area.size.width <= 0 {
+  case area.size.height <= 0 || area.size.width <= 0 || !is_scrollable(s) {
     True -> buf
     False -> {
       let has_start = s.arrow_start != ""
@@ -170,12 +180,14 @@ pub fn render_vertical(
 /// Render a horizontal scrollbar into the first row of `area`.
 /// Arrow characters (if non-empty) occupy the leftmost and rightmost cells;
 /// the track fills the remaining width.
+///
+/// Draws nothing when `total <= visible`, same as `render_vertical`.
 pub fn render_horizontal(
   buf: buffer.Buffer,
   area: geometry.Rect,
   s: Scrollbar,
 ) -> buffer.Buffer {
-  case area.size.height <= 0 || area.size.width <= 0 {
+  case area.size.height <= 0 || area.size.width <= 0 || !is_scrollable(s) {
     True -> buf
     False -> {
       let has_start = s.arrow_start != ""
