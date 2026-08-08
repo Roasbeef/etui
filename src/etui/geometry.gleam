@@ -44,6 +44,26 @@ pub type Constraint {
   Ratio(Int, Int)
   /// Flexible. Divides leftover equally after Length + Percentage + Ratio.
   Fill
+  /// Flexible with a weight: takes `weight / sum_of_weights` of the leftover.
+  /// `Fill` is `FillWeighted(1)`, so the two mix freely.
+  ///
+  /// ```gleam
+  /// // Sidebar one third, content two thirds
+  /// split_h(area, [FillWeighted(1), FillWeighted(2)])
+  /// ```
+  ///
+  /// A weight of 0 claims nothing.
+  FillWeighted(Int)
+}
+
+// How much of the fill budget a constraint pulls. Non-fill constraints pull
+// nothing: they were already sized by an earlier phase.
+fn fill_weight(c: Constraint) -> Int {
+  case c {
+    Fill -> 1
+    FillWeighted(w) -> int.max(0, w)
+    _ -> 0
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -219,11 +239,24 @@ fn indices_acc(i: Int, acc: List(Int)) -> List(Int) {
 /// 1. Length, exact, allocated first. Clamped to remaining budget in order.
 /// 2. Percentage + Ratio, proportional from total. Cumulative to prevent jitter.
 ///    Scaled proportionally if combined demand exceeds available budget.
-/// 3. Fill + Min + Max, divide remaining equally.
-///    Min applies a floor; Max applies a ceiling. Fill absorbs what is left.
-///    When the floors add up to more than the budget none of them can be
-///    honoured, so they are scaled to fit rather than over-allocated: the
-///    returned sizes always fit the area they were asked to fill.
+/// 3. Fill, FillWeighted, Min and Max share the remainder by weight, bounded
+///    by their floors and ceilings. When the bounds cannot all be met the
+///    sizes are scaled to fit rather than over-allocated: the result always
+///    fits the area it was asked to fill.
+///
+/// ## Stability under resize
+///
+/// With `Length`, `Percentage`, `Fill` and `FillWeighted`, growing the area by
+/// a cell never moves a boundary backwards, so a resize does not make panels
+/// jitter. `Min`, `Max` and `Ratio` can each break that by a cell:
+///
+/// - two `Ratio` constraints round down independently, so the cells left for
+///   anything else oscillate as the area grows;
+/// - a `Max` that snaps shut stops growing and hands its share to a `Fill`,
+///   which then grows by more than the area did.
+///
+/// Both are pinned by tests in `geometry_property_test`. Prefer `Percentage`
+/// or `FillWeighted` over `Ratio` when a layout is resized interactively.
 pub fn resolve_sizes(total: Int, constraints: List(Constraint)) -> List(Int) {
   case total < 0 {
     True -> list.map(constraints, fn(_) { 0 })
@@ -374,89 +407,214 @@ fn phase_proportional(
   }
 }
 
-// Flexible allocation for Fill, Min and Max.
+// A flexible constraint reduced to what allocation needs: how much of the
+// leftover it pulls, and the range it has to stay inside.
+type Slot {
+  /// Length, Percentage and Ratio: already sized, takes nothing here.
+  Rigid
+  Slot(weight: Int, lo: Int, hi: Int)
+}
+
+fn slot_of(c: Constraint, budget: Int) -> Slot {
+  case c {
+    Fill -> Slot(weight: 1, lo: 0, hi: budget)
+    FillWeighted(w) -> Slot(weight: int.max(0, w), lo: 0, hi: budget)
+    Min(n) -> Slot(weight: 1, lo: int.clamp(n, 0, budget), hi: budget)
+    Max(n) -> Slot(weight: 1, lo: 0, hi: int.clamp(n, 0, budget))
+    _ -> Rigid
+  }
+}
+
+// Flexible allocation for Fill, FillWeighted, Min and Max.
 //
-// Min and Max take their fair share of the leftover, bounded by their floor or
-// ceiling; Fill then absorbs whatever is still unclaimed. Two sub-passes are
-// enough because only Fill grows, so clamping a bound cannot change what the
-// other bounds resolve to.
+// Every flexible slot takes a weight-proportional share of the leftover,
+// bounded by its floor and ceiling. One pass cannot do that: clamping a slot
+// to a bound changes how much is left for the others. So the budget is settled
+// iteratively. Each round gives every still-open slot its share of what
+// remains, freezes the ones whose share fell outside their bounds, and repeats
+// with the smaller budget. A round that freezes nothing is the answer, and
+// every other round freezes at least one slot, so it converges in at most one
+// round per slot.
 //
-// The exception is over-subscription: a set of floors can add up to more than
-// the budget. `[Min(60), Min(60)]` on 100 used to resolve to `[60, 60]`, 120
-// cells, and build_rects then truncated the second to 40, so two identical
-// constraints came out different sizes. When the bounded sizes do not fit,
-// they are scaled to the budget instead, which keeps equal constraints equal.
+// The simpler version, giving every bounded slot `budget / count` and letting
+// Fill absorb the rest, is not monotone: an integer-division floor jumps, the
+// bounded slots snap to it, and the fill absorbs the discontinuity. Growing
+// the area by one cell could then make an earlier panel one cell narrower.
+// `[FillWeighted(4), Max(78), Percentage(21), Min(14)]` went from
+// `[61, 59, 47, 59]` at 226 cells to `[60, 60, 47, 60]` at 227.
 fn phase_flex(constraints: List(Constraint), budget: Int) -> List(Int) {
-  let flex_count =
-    list.count(constraints, fn(c) {
-      case c {
-        Fill | Min(_) | Max(_) -> True
-        _ -> False
+  let slots = list.map(constraints, slot_of(_, budget))
+  let frozen =
+    list.map(slots, fn(s) {
+      case s {
+        Rigid -> Ok(0)
+        Slot(..) -> Error(Nil)
       }
     })
-  case flex_count {
-    0 -> list.map(constraints, fn(_) { 0 })
-    _ -> {
-      let base = budget / flex_count
-      // Sub-pass 1: what each Min/Max resolves to at the base share.
-      let bounded =
-        list.map(constraints, fn(c) {
-          case c {
-            Min(n) -> int.max(n, base)
-            Max(n) -> int.min(n, base)
-            _ -> 0
-          }
-        })
-      let bounded_used = list.fold(bounded, 0, fn(a, b) { a + b })
-      case bounded_used > budget {
-        True -> {
-          // The bounds alone over-subscribe the budget, so none of them can be
-          // honoured. Share out in proportion to what each asked for; Fill,
-          // having asked for nothing here, gets nothing.
-          let #(sizes, _) =
-            phase_proportional(bounded, budget, bounded_used, 0, 0, [])
-          sizes
-        }
-        False -> fill_remainder(constraints, bounded, budget - bounded_used)
+  fit_to_budget(settle(slots, frozen, budget, list.length(slots) + 1), budget)
+}
+
+// Floors are wishes, not guarantees. Freezing one slot at its minimum leaves
+// less for the next, so a set of floors that looked affordable at the start
+// can over-subscribe by the time the last slot is frozen:
+// `[Min(17), Ratio(2, 4), Max(20), Min(49)]` on 166 settles to 169 cells.
+//
+// When that happens none of the floors can be honoured, so the sizes are
+// scaled to the budget, which keeps equal constraints equal instead of
+// over-allocating and letting build_rects truncate whoever came last.
+fn fit_to_budget(sizes: List(Int), budget: Int) -> List(Int) {
+  let total = list.fold(sizes, 0, fn(a, b) { a + b })
+  case total > budget {
+    False -> sizes
+    True -> {
+      let #(fitted, _) = phase_proportional(sizes, budget, total, 0, 0, [])
+      fitted
+    }
+  }
+}
+
+fn settle(
+  slots: List(Slot),
+  frozen: List(Result(Int, Nil)),
+  budget: Int,
+  fuel: Int,
+) -> List(Int) {
+  let taken =
+    list.fold(frozen, 0, fn(acc, f) {
+      case f {
+        Ok(n) -> acc + n
+        Error(Nil) -> acc
+      }
+    })
+  let remaining = int.max(0, budget - taken)
+  let open_weight = open_weight_of(slots, frozen)
+  case open_weight <= 0 || fuel <= 0 {
+    True -> list.map(frozen, unwrap_size)
+    False -> {
+      let shares = open_shares(slots, frozen, remaining, open_weight)
+      case clamp_round(slots, frozen, shares) {
+        // Nothing fell outside its bounds, so this distribution stands.
+        Error(Nil) -> merge_shares(frozen, shares)
+        Ok(next) -> settle(slots, next, budget, fuel - 1)
       }
     }
   }
 }
 
-// Sub-pass 2: split what the bounds left over among the Fill constraints,
-// remainder cells going to the earliest ones.
-fn fill_remainder(
-  constraints: List(Constraint),
-  bounded: List(Int),
-  fill_budget: Int,
-) -> List(Int) {
-  let fill_count =
-    list.count(constraints, fn(c) {
-      case c {
-        Fill -> True
-        _ -> False
-      }
-    })
-  let #(fill_base, fill_extra) = case fill_count {
-    0 -> #(0, 0)
-    _ -> #(fill_budget / fill_count, fill_budget % fill_count)
+fn open_weight_of(slots: List(Slot), frozen: List(Result(Int, Nil))) -> Int {
+  case slots, frozen {
+    [Slot(weight: w, ..), ..s_rest], [Error(Nil), ..f_rest] ->
+      w + open_weight_of(s_rest, f_rest)
+    [_, ..s_rest], [_, ..f_rest] -> open_weight_of(s_rest, f_rest)
+    _, _ -> 0
   }
-  let #(sizes, _) =
-    list.fold(list.zip(constraints, bounded), #([], 0), fn(state, pair) {
-      let #(acc, fill_idx) = state
-      let #(c, bounded_size) = pair
-      case c {
-        Fill -> {
-          let size = case fill_idx < fill_extra {
-            True -> fill_base + 1
-            False -> fill_base
-          }
-          #([size, ..acc], fill_idx + 1)
-        }
-        _ -> #([bounded_size, ..acc], fill_idx)
+}
+
+// Weight-proportional split of `remaining` across the open slots. Frozen
+// positions get 0. Division remainders go one each to the earliest open slots,
+// so `[Fill, Fill, Fill]` on 10 is `[4, 3, 3]`.
+fn open_shares(
+  slots: List(Slot),
+  frozen: List(Result(Int, Nil)),
+  remaining: Int,
+  total_weight: Int,
+) -> List(Int) {
+  let bases = base_shares(slots, frozen, remaining, total_weight, [])
+  let claimed = list.fold(bases, 0, fn(a, b) { a + b })
+  spread_remainder(slots, frozen, bases, remaining - claimed, [])
+}
+
+fn base_shares(
+  slots: List(Slot),
+  frozen: List(Result(Int, Nil)),
+  remaining: Int,
+  total_weight: Int,
+  acc: List(Int),
+) -> List(Int) {
+  case slots, frozen {
+    [Slot(weight: w, ..), ..s_rest], [Error(Nil), ..f_rest] ->
+      base_shares(s_rest, f_rest, remaining, total_weight, [
+        remaining * w / total_weight,
+        ..acc
+      ])
+    [_, ..s_rest], [_, ..f_rest] ->
+      base_shares(s_rest, f_rest, remaining, total_weight, [0, ..acc])
+    _, _ -> list.reverse(acc)
+  }
+}
+
+fn spread_remainder(
+  slots: List(Slot),
+  frozen: List(Result(Int, Nil)),
+  bases: List(Int),
+  extra: Int,
+  acc: List(Int),
+) -> List(Int) {
+  case slots, frozen, bases {
+    [Slot(weight: w, ..), ..s_rest], [Error(Nil), ..f_rest], [b, ..b_rest] ->
+      case w > 0 && extra > 0 {
+        True ->
+          spread_remainder(s_rest, f_rest, b_rest, extra - 1, [b + 1, ..acc])
+        False -> spread_remainder(s_rest, f_rest, b_rest, extra, [b, ..acc])
       }
-    })
-  list.reverse(sizes)
+    [_, ..s_rest], [_, ..f_rest], [b, ..b_rest] ->
+      spread_remainder(s_rest, f_rest, b_rest, extra, [b, ..acc])
+    _, _, _ -> list.reverse(acc)
+  }
+}
+
+// Freeze every open slot whose share fell outside its bounds. `Error(Nil)`
+// means nothing was out of bounds, so the round is final.
+fn clamp_round(
+  slots: List(Slot),
+  frozen: List(Result(Int, Nil)),
+  shares: List(Int),
+) -> Result(List(Result(Int, Nil)), Nil) {
+  let next = clamp_loop(slots, frozen, shares, [])
+  case next == frozen {
+    True -> Error(Nil)
+    False -> Ok(next)
+  }
+}
+
+fn clamp_loop(
+  slots: List(Slot),
+  frozen: List(Result(Int, Nil)),
+  shares: List(Int),
+  acc: List(Result(Int, Nil)),
+) -> List(Result(Int, Nil)) {
+  case slots, frozen, shares {
+    [Slot(lo: lo, hi: hi, ..), ..s_rest], [Error(Nil), ..f_rest], [s, ..sh_rest]
+    -> {
+      let entry = case s < lo, s > hi {
+        True, _ -> Ok(lo)
+        _, True -> Ok(hi)
+        _, _ -> Error(Nil)
+      }
+      clamp_loop(s_rest, f_rest, sh_rest, [entry, ..acc])
+    }
+    [_, ..s_rest], [f, ..f_rest], [_, ..sh_rest] ->
+      clamp_loop(s_rest, f_rest, sh_rest, [f, ..acc])
+    _, _, _ -> list.reverse(acc)
+  }
+}
+
+fn merge_shares(
+  frozen: List(Result(Int, Nil)),
+  shares: List(Int),
+) -> List(Int) {
+  case frozen, shares {
+    [Ok(n), ..f_rest], [_, ..s_rest] -> [n, ..merge_shares(f_rest, s_rest)]
+    [Error(Nil), ..f_rest], [s, ..s_rest] -> [s, ..merge_shares(f_rest, s_rest)]
+    _, _ -> []
+  }
+}
+
+fn unwrap_size(f: Result(Int, Nil)) -> Int {
+  case f {
+    Ok(n) -> n
+    Error(Nil) -> 0
+  }
 }
 
 fn assemble_sizes(
@@ -515,7 +673,7 @@ fn pick_size(
         [h, ..] -> h
         _ -> 0
       }
-    Fill | Min(_) | Max(_) ->
+    Fill | FillWeighted(_) | Min(_) | Max(_) ->
       case flexes {
         [h, ..] -> h
         _ -> 0

@@ -67,12 +67,14 @@ pub fn equal_minimums_that_do_not_fit_stay_equal_test() {
   |> should.equal([50, 50])
 }
 
-pub fn unequal_minimums_that_do_not_fit_scale_in_proportion_test() {
-  // Base share is 50, so Min(60) wants 60 and Min(30) wants 50: 110 in total.
-  // Scaled back to 100 they keep their ratio and still fill the area exactly.
+pub fn unequal_minimums_are_both_honoured_when_they_can_be_test() {
+  // Min(60) is below the even split, so it is raised to its floor and the
+  // rest goes to Min(30), which lands at 40, still above its own floor. Both
+  // minimums hold. An earlier attempt scaled these to [54, 46], which honours
+  // neither.
   let sizes = resolve_sizes(100, [Min(60), Min(30)])
   sizes
-  |> should.equal([54, 46])
+  |> should.equal([60, 40])
   list.fold(sizes, 0, fn(a, b) { a + b })
   |> should.equal(100)
 }
@@ -124,9 +126,12 @@ pub fn max_zero_gets_zero_test() {
 // Mixed new constraints
 
 pub fn min_max_fill_together_test() {
-  // flex_budget=90, 3 flex slots, base=30. Min(10)→30, Max(20)→20. Fill gets 90-30-20=40.
+  // Even split is 30 each. Max(20) is capped and gives up 10, which Min and
+  // Fill then share: both are flexible participants, so neither has a claim
+  // on the slack that the other lacks. Previously Fill absorbed all of it and
+  // the result was [30, 20, 40].
   resolve_sizes(90, [Min(10), Max(20), Fill])
-  |> should.equal([30, 20, 40])
+  |> should.equal([35, 20, 35])
 }
 
 pub fn ratio_and_fill_test() {
@@ -135,9 +140,8 @@ pub fn ratio_and_fill_test() {
 }
 
 pub fn all_six_constraints_test() {
-  // Length(10), Percentage(20)→20, Ratio(1,4)→25
-  // flex_budget=45, 3 flex slots, base=15
-  // Min(5)→15, Max(10)→10. Fill gets 45-15-10=20.
+  // Length(10), Percentage(20)→20, Ratio(1,4)→25 leave 45 for three flexible
+  // slots, 15 each. Max(10) is capped and releases 5, which Min and Fill share.
   resolve_sizes(100, [
     Length(10),
     Percentage(20),
@@ -146,7 +150,7 @@ pub fn all_six_constraints_test() {
     Max(10),
     Fill,
   ])
-  |> should.equal([10, 20, 25, 15, 10, 20])
+  |> should.equal([10, 20, 25, 18, 10, 17])
 }
 
 // ─────────────────────────────────────────────────────────────────
