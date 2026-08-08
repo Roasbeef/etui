@@ -15,6 +15,7 @@ import etui/geometry
 import etui/span
 import etui/style
 import etui/text
+import gleam/int
 import gleam/list
 
 // ─────────────────────────────────────────────────────────────────
@@ -105,20 +106,23 @@ pub fn render(
           style.none(),
         )
 
-      // Left section: render from x=0
-      let buf2 = render_section(buf1, sb.left, area.position.x, y, w, sb)
-
-      // Right section: measure width, render flush-right
-      let right_width = section_width(sb.right)
+      // The three sections are given disjoint spans of the bar, so a bar too
+      // narrow to hold them truncates instead of overwriting itself. Left and
+      // right are placed first and never overlap each other; the centre gets
+      // whatever gap is left between them, which may be nothing.
+      let right_width = int.min(section_width(sb.right), w)
+      let left_width =
+        int.min(section_width(sb.left), int.max(0, w - right_width))
       let right_x = area.position.x + w - right_width
-      let buf3 = case right_x >= area.position.x {
-        True -> render_section(buf2, sb.right, right_x, y, right_width, sb)
-        False -> buf2
-      }
 
-      // Center section: measure width, render centered
-      let center_width = section_width(sb.center)
-      let center_x = area.position.x + { w - center_width } / 2
+      let buf2 =
+        render_section(buf1, sb.left, area.position.x, y, left_width, sb)
+      let buf3 = render_section(buf2, sb.right, right_x, y, right_width, sb)
+
+      let gap_start = area.position.x + left_width
+      let gap = int.max(0, right_x - gap_start)
+      let center_width = int.min(section_width(sb.center), gap)
+      let center_x = gap_start + { gap - center_width } / 2
       render_section(buf3, sb.center, center_x, y, center_width, sb)
     }
   }

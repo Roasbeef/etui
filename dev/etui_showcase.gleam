@@ -115,13 +115,13 @@ fn put1(
 
 // ─── Data ────────────────────────────────────────────────────────
 
-type PkgStatus {
+pub type PkgStatus {
   Stable
   Beta
   Deprecated
 }
 
-type Package {
+pub type Package {
   Package(
     name: String,
     version: String,
@@ -362,7 +362,7 @@ fn make_tree() -> tree.TreeWidget {
 
 // ─── Model ───────────────────────────────────────────────────────
 
-type Tab {
+pub type Tab {
   TabForm
   TabList
   TabTree
@@ -370,18 +370,18 @@ type Tab {
   TabAbout
 }
 
-type FormField {
+pub type FormField {
   FieldName
   FieldHost
   FieldTag
 }
 
-type ListFocus {
+pub type ListFocus {
   FocusList
   FocusTable
 }
 
-type Model {
+pub type Model {
   Model(
     tab: Tab,
     form: form.Form(FormField),
@@ -413,7 +413,7 @@ fn make_form() -> form.Form(FormField) {
   |> form.add_required(FieldTag, "Tag", "")
 }
 
-fn initial_model() -> Model {
+pub fn initial_model() -> Model {
   let tw = make_tree()
   let ts =
     tree.state_new()
@@ -1053,7 +1053,12 @@ fn draw_notifs(buf: buffer.Buffer, m: Model) -> buffer.Buffer {
 
 // ─── Render ──────────────────────────────────────────────────────
 
-fn render(m: Model, screen: Rect, anim_st: anim.AnimState) -> buffer.Buffer {
+/// Exposed so screen-level tests can render a whole frame without a TTY.
+pub fn render(
+  m: Model,
+  screen: Rect,
+  anim_st: anim.AnimState,
+) -> buffer.Buffer {
   let m = Model(..m, width: screen.size.width, height: screen.size.height)
   let frame = anim_st.frame
   let buf = case m.tab {
@@ -1070,7 +1075,7 @@ fn render(m: Model, screen: Rect, anim_st: anim.AnimState) -> buffer.Buffer {
 
 // ─── Update ──────────────────────────────────────────────────────
 
-fn update(event: backend.InputEvent, m: Model) -> Model {
+pub fn update(event: backend.InputEvent, m: Model) -> Model {
   let m = Model(..m, notifs: notif.tick(m.notifs))
   case event {
     backend.Resize(w, h) -> Model(..m, width: w, height: h)
