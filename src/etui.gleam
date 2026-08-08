@@ -78,4 +78,4 @@
 /// | Help (key bindings) | `etui/widgets/help` |
 /// | Fieldset | `etui/widgets/fieldset` |
 /// | MultiSelect | `etui/widgets/multi_select` *(stateful)* |
-pub const version = "1.1.0"
+pub const version = "2.0.0"

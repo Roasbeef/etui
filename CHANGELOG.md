@@ -2,10 +2,10 @@
 
 All notable changes to étui are listed here.
 
-## 1.1.0 - unreleased
+## 2.0.0 - unreleased
 
-Work towards ratatui-level flexibility, in two parts: layout and composition
-primitives, then a real input parser.
+Ratatui-level flexibility. Layout and composition primitives, a real input
+parser, and a Terminal you can drive from your own loop.
 
 ### Breaking
 
