@@ -54,39 +54,29 @@ fill_bin(Arr, Idx, MaxIdx, <<16#7F, Rest/binary>>, Fg, Bg, Mod, Link, T) ->
 fill_bin(Arr, Idx, MaxIdx, Bin, Fg, Bg, Mod, Link, T) ->
     case string:next_grapheme(Bin) of
         [] -> Arr;
-        [G | Rest] when is_integer(G) ->
-            GBin = unicode:characters_to_binary([G]),
-            W = cp_width(G),
-            Cell = {cell, {content, GBin, W}, Fg, Bg, Mod, Link},
-            Arr2 = array:set(Idx, Cell, Arr),
-            case W >= 2 of
-                true ->
-                    Cont = {cell, continuation, Fg, Bg, Mod, <<>>},
-                    Arr3 = case Idx + 1 < MaxIdx of
-                        true  -> array:set(Idx + 1, Cont, Arr2);
-                        false -> Arr2
-                    end,
-                    fill_bin(Arr3, Idx + 2, MaxIdx, Rest, Fg, Bg, Mod, Link, T);
-                false ->
-                    fill_bin(Arr2, Idx + 1, MaxIdx, Rest, Fg, Bg, Mod, Link, T)
-            end;
-        [[FirstCp | _] = GList | Rest] ->
-            GBin = unicode:characters_to_binary(GList),
-            W = cp_width(FirstCp),
-            Cell = {cell, {content, GBin, W}, Fg, Bg, Mod, Link},
-            Arr2 = array:set(Idx, Cell, Arr),
-            case W >= 2 of
-                true ->
-                    Cont = {cell, continuation, Fg, Bg, Mod, <<>>},
-                    Arr3 = case Idx + 1 < MaxIdx of
-                        true  -> array:set(Idx + 1, Cont, Arr2);
-                        false -> Arr2
-                    end,
-                    fill_bin(Arr3, Idx + 2, MaxIdx, Rest, Fg, Bg, Mod, Link, T);
-                false ->
-                    fill_bin(Arr2, Idx + 1, MaxIdx, Rest, Fg, Bg, Mod, Link, T)
-            end
+        [G | Rest] ->
+            {GBin, FirstCp} = grapheme_parts(G),
+            fill_grapheme(Arr, Idx, MaxIdx, Rest, GBin, cp_width(FirstCp),
+                          Fg, Bg, Mod, Link, T)
     end.
+
+%% Write one grapheme cluster at Idx.
+%%
+%% A wide grapheme needs two columns. If only one is left before MaxIdx the
+%% cell is left blank: writing the glyph anyway made it overflow the clip
+%% boundary and shift everything to its right.
+fill_grapheme(Arr, Idx, MaxIdx, Rest, _GBin, W, Fg, Bg, Mod, Link, T)
+        when W >= 2, Idx + 1 >= MaxIdx ->
+    fill_bin(Arr, Idx + 1, MaxIdx, Rest, Fg, Bg, Mod, Link, T);
+fill_grapheme(Arr, Idx, MaxIdx, Rest, GBin, W, Fg, Bg, Mod, Link, T)
+        when W >= 2 ->
+    Cell = {cell, {content, GBin, W}, Fg, Bg, Mod, Link},
+    Cont = {cell, continuation, Fg, Bg, Mod, <<>>},
+    Arr2 = array:set(Idx + 1, Cont, array:set(Idx, Cell, Arr)),
+    fill_bin(Arr2, Idx + 2, MaxIdx, Rest, Fg, Bg, Mod, Link, T);
+fill_grapheme(Arr, Idx, MaxIdx, Rest, GBin, W, Fg, Bg, Mod, Link, T) ->
+    Cell = {cell, {content, GBin, W}, Fg, Bg, Mod, Link},
+    fill_bin(array:set(Idx, Cell, Arr), Idx + 1, MaxIdx, Rest, Fg, Bg, Mod, Link, T).
 
 %% Fill an entire Width×Height buffer from scratch using array:from_list/2.
 %% Each row gets the same Bin text. Builds cells as a reversed flat list,
@@ -104,17 +94,55 @@ build_buffer_rev(Width, Height, Row, Bin, Fg, Bg, Mod, Link, T, Default, RevAcc)
     build_buffer_rev(Width, Height, Row + 1, Bin, Fg, Bg, Mod, Link, T, Default, RevAcc2).
 
 %% Produces exactly Width cells, padding with Default if Bin is exhausted.
+%% Mirrors fill_bin/9 clause for clause: ASCII fast path, control characters
+%% consume no cell, everything else goes through grapheme segmentation.
 build_row_rev(Width, Col, _, _, _, _, _, _, _Default, RevAcc) when Col >= Width ->
     RevAcc;
 build_row_rev(Width, Col, <<>>, _Fg, _Bg, _Mod, _Link, _T, Default, RevAcc) ->
     fill_rev(Width - Col, Default, RevAcc);
+%% ASCII printable fast path: cached Content tuple, single Cell alloc per char.
 build_row_rev(Width, Col, <<B, Rest/binary>>, Fg, Bg, Mod, Link, T, Default, RevAcc)
         when B >= 16#20, B < 16#7F ->
     Content = element(B + 1, T),
     Cell = {cell, Content, Fg, Bg, Mod, Link},
     build_row_rev(Width, Col + 1, Rest, Fg, Bg, Mod, Link, T, Default, [Cell | RevAcc]);
-build_row_rev(Width, Col, <<_B, Rest/binary>>, Fg, Bg, Mod, Link, T, Default, RevAcc) ->
-    build_row_rev(Width, Col, Rest, Fg, Bg, Mod, Link, T, Default, RevAcc).
+%% Control characters and DEL occupy no cell.
+build_row_rev(Width, Col, <<B, Rest/binary>>, Fg, Bg, Mod, Link, T, Default, RevAcc)
+        when B < 16#20; B =:= 16#7F ->
+    build_row_rev(Width, Col, Rest, Fg, Bg, Mod, Link, T, Default, RevAcc);
+%% Non-ASCII: grapheme cluster segmentation + East Asian width.
+%% Dropping these (the previous catch-all did) silently deleted every CJK and
+%% emoji character from a filled buffer, and diverged from the JS backend.
+build_row_rev(Width, Col, Bin, Fg, Bg, Mod, Link, T, Default, RevAcc) ->
+    case string:next_grapheme(Bin) of
+        [] ->
+            fill_rev(Width - Col, Default, RevAcc);
+        [G | Rest] ->
+            {GBin, FirstCp} = grapheme_parts(G),
+            case cp_width(FirstCp) of
+                W when W >= 2, Col + 1 >= Width ->
+                    %% No room for the trailing half. Emit a blank rather than
+                    %% a wide glyph that would overflow the row.
+                    build_row_rev(Width, Col + 1, Rest, Fg, Bg, Mod, Link, T,
+                                  Default, [Default | RevAcc]);
+                W when W >= 2 ->
+                    Cell = {cell, {content, GBin, W}, Fg, Bg, Mod, Link},
+                    Cont = {cell, continuation, Fg, Bg, Mod, <<>>},
+                    build_row_rev(Width, Col + 2, Rest, Fg, Bg, Mod, Link, T,
+                                  Default, [Cont, Cell | RevAcc]);
+                W ->
+                    Cell = {cell, {content, GBin, W}, Fg, Bg, Mod, Link},
+                    build_row_rev(Width, Col + 1, Rest, Fg, Bg, Mod, Link, T,
+                                  Default, [Cell | RevAcc])
+            end
+    end.
+
+%% string:next_grapheme/1 yields a bare codepoint for a single-codepoint
+%% cluster and a list for a multi-codepoint one (ZWJ sequence, flag pair).
+grapheme_parts(G) when is_integer(G) ->
+    {unicode:characters_to_binary([G]), G};
+grapheme_parts([FirstCp | _] = GList) ->
+    {unicode:characters_to_binary(GList), FirstCp}.
 
 fill_rev(0, _, Acc) -> Acc;
 fill_rev(N, V, Acc) -> fill_rev(N - 1, V, [V | Acc]).

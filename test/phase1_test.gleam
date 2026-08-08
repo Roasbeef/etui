@@ -4,6 +4,7 @@ import etui/buffer
 import etui/geometry.{type Rect, Margin, Position, Rect, Size}
 import etui/style
 import etui/text
+import gleam/string
 import gleeunit/should
 
 // ─────────────────────────────────────────────────────────────────
@@ -178,6 +179,103 @@ pub fn blit_of_a_disjoint_window_is_a_no_op_test() {
     buffer.blit(dst, src, geometry.rect_new(50, 50, 2, 1), Position(0, 0))
   text_at(out, 0, 2)
   |> should.equal("..")
+}
+
+// ─────────────────────────────────────────────────────────────────
+// buffer: wide graphemes at a clip boundary
+//
+// These run on both targets on purpose: the Erlang fill path is native and
+// the JavaScript one falls back to the Gleam body, and the two used to
+// disagree about non-ASCII input.
+
+fn wide_row() -> buffer.Buffer {
+  // [漢, cont, 字, cont, a, b]
+  buffer.buffer_new(geometry.rect_new(0, 0, 6, 1))
+  |> buffer.set_string(
+    Position(0, 0),
+    "漢字ab",
+    style.Default,
+    style.Default,
+    style.none(),
+  )
+}
+
+fn shape(buf: buffer.Buffer, x: Int) -> String {
+  let cell = buffer.get_cell(buf, Position(x, 0))
+  case buffer.is_continuation(cell) {
+    True -> "<cont>"
+    False -> buffer.cell_symbol(cell)
+  }
+}
+
+pub fn set_string_lays_wide_graphemes_over_two_cells_test() {
+  let buf = wide_row()
+  #(shape(buf, 0), shape(buf, 1), shape(buf, 2), shape(buf, 3), shape(buf, 4))
+  |> should.equal(#("漢", "<cont>", "字", "<cont>", "a"))
+}
+
+pub fn buffer_new_filled_keeps_non_ascii_test() {
+  // The Erlang fill_all_rows path used to drop every non-ASCII byte without
+  // emitting a cell, so this row came back as "b" on Erlang and "漢<cont>b"
+  // on JavaScript.
+  let buf = filled(geometry.rect_new(0, 0, 4, 1), "漢b")
+  #(shape(buf, 0), shape(buf, 1), shape(buf, 2))
+  |> should.equal(#("漢", "<cont>", "b"))
+}
+
+pub fn a_wide_grapheme_that_cannot_fit_leaves_the_cell_blank_test() {
+  // Only one column left: drawing 漢 there would overflow the clip boundary.
+  let buf =
+    buffer.buffer_new(geometry.rect_new(0, 0, 2, 1))
+    |> buffer.set_string(
+      Position(1, 0),
+      "漢",
+      style.Default,
+      style.Default,
+      style.none(),
+    )
+  shape(buf, 1)
+  |> should.equal(" ")
+}
+
+pub fn blit_blanks_a_leading_orphan_continuation_test() {
+  // Window starts on the right half of 漢. Copying the bare continuation
+  // would render as nothing and shift the whole row one cell left.
+  let dst = buffer.buffer_new(geometry.rect_new(0, 0, 6, 1))
+  let out =
+    buffer.blit(dst, wide_row(), geometry.rect_new(1, 0, 4, 1), Position(0, 0))
+  #(shape(out, 0), shape(out, 1), shape(out, 2), shape(out, 3))
+  |> should.equal(#(" ", "字", "<cont>", "a"))
+}
+
+pub fn blit_blanks_a_trailing_half_grapheme_test() {
+  // Window ends on the left half of 字; its continuation is outside.
+  let dst = buffer.buffer_new(geometry.rect_new(0, 0, 6, 1))
+  let out =
+    buffer.blit(dst, wide_row(), geometry.rect_new(0, 0, 3, 1), Position(0, 0))
+  #(shape(out, 0), shape(out, 1), shape(out, 2))
+  |> should.equal(#("漢", "<cont>", " "))
+}
+
+pub fn blit_of_a_clean_window_keeps_the_pair_intact_test() {
+  let dst = buffer.buffer_new(geometry.rect_new(0, 0, 6, 1))
+  let out =
+    buffer.blit(dst, wide_row(), geometry.rect_new(0, 0, 4, 1), Position(0, 0))
+  #(shape(out, 0), shape(out, 1), shape(out, 2), shape(out, 3))
+  |> should.equal(#("漢", "<cont>", "字", "<cont>"))
+}
+
+pub fn to_ansi_of_a_blitted_window_fills_every_column_test() {
+  // The regression this whole group exists for: an orphan continuation emits
+  // no text, so the rendered row came out one cell short and everything after
+  // it drew in the wrong column.
+  let dst = buffer.buffer_new(geometry.rect_new(0, 0, 4, 1))
+  let out =
+    buffer.blit(dst, wide_row(), geometry.rect_new(1, 0, 4, 1), Position(0, 0))
+  buffer.to_ansi(out)
+  |> string.replace("\u{001B}[1;1H", "")
+  |> text.cell_width
+  |> should.equal(4)
 }
 
 // ─────────────────────────────────────────────────────────────────

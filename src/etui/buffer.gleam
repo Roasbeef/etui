@@ -147,14 +147,28 @@ fn fill_graphemes(
               modifier: modifier,
               link: link,
             )
-          let arr2 = array_set(idx, cell, arr)
           case w >= 2 {
+            // A wide grapheme needs two columns. With only one left before
+            // max_idx, leave the cell blank: writing the glyph anyway made it
+            // overflow the clip boundary and shift everything to its right.
+            True if idx + 1 >= max_idx ->
+              fill_graphemes(
+                arr,
+                idx + 1,
+                max_idx,
+                rest,
+                fg,
+                bg,
+                modifier,
+                link,
+              )
             True -> {
-              let arr3 = case idx + 1 < max_idx {
-                True ->
-                  array_set(idx + 1, continuation_cell(fg, bg, modifier), arr2)
-                False -> arr2
-              }
+              let arr3 =
+                array_set(
+                  idx + 1,
+                  continuation_cell(fg, bg, modifier),
+                  array_set(idx, cell, arr),
+                )
               fill_graphemes(
                 arr3,
                 idx + 2,
@@ -168,7 +182,7 @@ fn fill_graphemes(
             }
             False ->
               fill_graphemes(
-                arr2,
+                array_set(idx, cell, arr),
                 idx + 1,
                 max_idx,
                 rest,
@@ -516,6 +530,7 @@ fn blit_rows(
           src_base,
           dst_base,
           d.position.x,
+          d.position.x,
           geometry.right(d),
         )
       blit_rows(src, dst_area, cells2, d, dx, dy, y + 1)
@@ -529,19 +544,35 @@ fn blit_row(
   src_base: Int,
   dst_base: Int,
   x: Int,
+  x_min: Int,
   x_max: Int,
 ) -> CellArray {
   case x >= x_max {
     True -> cells
-    False ->
+    False -> {
+      let cell = array_get(src_base + x, src_cells)
       blit_row(
         src_cells,
-        array_set(dst_base + x, array_get(src_base + x, src_cells), cells),
+        array_set(dst_base + x, clip_edge(cell, x, x_min, x_max), cells),
         src_base,
         dst_base,
         x + 1,
+        x_min,
         x_max,
       )
+    }
+  }
+}
+
+// A window can start on the right half of a wide grapheme or end on its left
+// half. Copying either half alone corrupts the row: an orphan Continuation
+// renders as nothing and shifts everything after it left by a cell, while an
+// orphan wide cell draws over its neighbour. Blank both.
+fn clip_edge(cell: Cell, x: Int, x_min: Int, x_max: Int) -> Cell {
+  case cell.content {
+    Continuation if x == x_min -> empty_cell()
+    Content(width: w, ..) if w >= 2 && x == x_max - 1 -> empty_cell()
+    _ -> cell
   }
 }
 
