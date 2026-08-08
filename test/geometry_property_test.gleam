@@ -21,8 +21,8 @@ fn lcg(seed: Int) -> Int {
 
 /// Which constraint kinds a generator may emit.
 ///
-/// `All` covers the whole type. `MonotoneSafe` drops the kinds whose integer
-/// rounding is not monotone in the total, see `prop_monotone_test`.
+/// `All` covers the whole type. `MonotoneSafe` drops `Min`, `Max` and `Ratio`,
+/// which are not monotone in the total, see `prop_monotone_test`.
 pub type Kinds {
   All
   MonotoneSafe
@@ -244,17 +244,17 @@ pub fn prop_single_fill_absorbs_all_test() {
   })
 }
 
-// ─── Known limits of monotonicity ──────────────────────────────────
+// ─── Stability under resize ────────────────────────────────────────
 //
-// prop_monotone runs on Length, Percentage, Fill and FillWeighted, where a
-// growing area never moves a boundary backwards. Min, Max and Ratio can each
-// break that by a cell, and these pin the two mechanisms so a future change
-// to either is a deliberate one rather than a surprise.
+// prop_monotone runs on Length, Percentage, Fill and FillWeighted, where
+// growing the area never moves a boundary backwards. These pin the two things
+// that were investigated around that.
 
-pub fn ratio_rounding_can_move_a_boundary_back_test() {
-  // Two ratios that together claim the whole area round down independently,
-  // so the cells left over for anything else oscillate 1, 0, 1, 0 as the area
-  // grows. Here the first slot has one cell at 271 and none at 272.
+pub fn ratios_do_not_leave_an_oscillating_remainder_test() {
+  // Rounding each ratio on its own left a remainder that flipped between one
+  // cell and none as the area grew, so anything sharing the layout with two
+  // ratios grew and shrank while the terminal was only growing. The running
+  // fraction removes it: the ratios claim the whole area at both sizes.
   let cs = [
     geometry.Min(23),
     geometry.Fill,
@@ -262,18 +262,37 @@ pub fn ratio_rounding_can_move_a_boundary_back_test() {
     geometry.Ratio(1, 2),
   ]
   geometry.resolve_sizes(271, cs)
-  |> should.equal([1, 0, 135, 135])
+  |> should.equal([0, 0, 135, 136])
   geometry.resolve_sizes(272, cs)
   |> should.equal([0, 0, 136, 136])
 }
 
-pub fn a_bound_snapping_shut_can_move_a_boundary_back_test() {
-  // Max(3) is above the even split at 8 cells and below it at 9, so it stops
-  // growing and hands its share to the fill. The fill grows by more than the
-  // area did, which pushes the boundary between them backwards.
+pub fn a_bound_that_snaps_shut_still_moves_forward_test() {
+  // Max(3) stops growing and hands its share to the fill. The boundary between
+  // them holds and the fill takes the extra cell, so this shape is stable even
+  // though it involves a ceiling.
   let cs = [geometry.Max(3), geometry.Fill]
   geometry.resolve_sizes(8, cs)
   |> should.equal([3, 5])
   geometry.resolve_sizes(9, cs)
   |> should.equal([3, 6])
+}
+
+pub fn a_floor_crossing_its_threshold_is_the_remaining_limit_test() {
+  // Min(36) is pinned at its floor while the even share is 35 and free once it
+  // is 36, and the slots it competes with resize sharply when that flips. This
+  // is the residual non-monotone case: it is a property of clamping and
+  // redistributing at all, not of the order the bounds are applied in.
+  // Settling ceilings before floors was tried and made the worst case larger.
+  let cs = [
+    geometry.Min(10),
+    geometry.Min(8),
+    geometry.Min(36),
+    geometry.Length(42),
+    geometry.Max(7),
+  ]
+  geometry.resolve_sizes(184, cs)
+  |> should.equal([50, 49, 36, 42, 7])
+  geometry.resolve_sizes(185, cs)
+  |> should.equal([46, 45, 45, 42, 7])
 }
