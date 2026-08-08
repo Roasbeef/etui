@@ -56,16 +56,6 @@ pub type Constraint {
   FillWeighted(Int)
 }
 
-// How much of the fill budget a constraint pulls. Non-fill constraints pull
-// nothing: they were already sized by an earlier phase.
-fn fill_weight(c: Constraint) -> Int {
-  case c {
-    Fill -> 1
-    FillWeighted(w) -> int.max(0, w)
-    _ -> 0
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────
 // Constructors
 
@@ -770,53 +760,8 @@ pub fn split(
   area: Rect,
   constraints: List(Constraint),
 ) -> List(Rect) {
-  let total = case direction {
-    Vertical -> area.size.height
-    Horizontal -> area.size.width
-  }
-
-  let sizes = resolve_sizes(total, constraints)
-
-  build_rects(direction, area, sizes, 0, [])
+  split_with(direction, area, constraints, FlexStart, 0)
 }
-
-fn build_rects(
-  direction: Direction,
-  area: Rect,
-  sizes: List(Int),
-  cursor: Int,
-  acc: List(Rect),
-) -> List(Rect) {
-  let limit = case direction {
-    Vertical -> area.size.height
-    Horizontal -> area.size.width
-  }
-  case sizes {
-    [] -> list.reverse(acc)
-    [size, ..rest] -> {
-      // Clamp so no child Rect extends past the parent boundary.
-      // This guards against over-budget Min/Max constraints.
-      let start = int.min(cursor, limit)
-      let clamped = int.min(size, int.max(0, limit - start))
-      let rect = case direction {
-        Vertical ->
-          Rect(
-            position: Position(x: area.position.x, y: area.position.y + start),
-            size: Size(width: area.size.width, height: clamped),
-          )
-        Horizontal ->
-          Rect(
-            position: Position(x: area.position.x + start, y: area.position.y),
-            size: Size(width: clamped, height: area.size.height),
-          )
-      }
-      build_rects(direction, area, rest, start + clamped, [rect, ..acc])
-    }
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Layout with spacing
 
 /// Split a rect with `spacing` cells of gap between each child.
 /// Gap cells are taken from the total before distributing to constraints.
@@ -831,39 +776,175 @@ pub fn split_with_spacing(
   constraints: List(Constraint),
   spacing: Int,
 ) -> List(Rect) {
+  split_with(direction, area, constraints, FlexStart, spacing)
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Flex layout
+
+/// How leftover space is distributed once the children have been sized.
+///
+/// | Flex          | Where the leftover goes                                  |
+/// |---------------|----------------------------------------------------------|
+/// | `FlexStart`   | After the last child.                                    |
+/// | `FlexEnd`     | Before the first child.                                  |
+/// | `FlexCenter`  | Split between the two edges.                             |
+/// | `FlexBetween` | Between children, nothing at the edges.                   |
+/// | `FlexAround`  | Around each child: edges get half of an inner gap.        |
+/// | `FlexEvenly`  | Equally between children and at both edges.               |
+pub type Flex {
+  FlexStart
+  FlexEnd
+  FlexCenter
+  FlexBetween
+  FlexAround
+  FlexEvenly
+}
+
+/// Former name of `Flex`.
+pub type FlexJustify =
+  Flex
+
+/// Split a rect with both a fixed gap between children and a rule for the
+/// space nobody claimed. This is the general form; `split`, `split_h`,
+/// `split_v`, `split_with_spacing` and `split_flex` are all this function with
+/// some arguments filled in.
+///
+/// `spacing` is a gap that always sits between children and is taken out of
+/// the budget before the constraints are resolved. `flex` then places whatever
+/// the constraints did not claim. The two compose: `FlexBetween` with a
+/// spacing of 2 keeps at least two cells between children and spreads the rest
+/// on top of that.
+///
+/// ```gleam
+/// // Toolbar: fixed buttons pushed to the edges, at least 1 cell apart
+/// split_with(Horizontal, area, [Length(8), Length(8)], FlexBetween, 1)
+///
+/// // A 20-wide dialog centred in the area
+/// split_with(Horizontal, area, [Length(20)], FlexCenter, 0)
+/// ```
+pub fn split_with(
+  direction: Direction,
+  area: Rect,
+  constraints: List(Constraint),
+  flex: Flex,
+  spacing: Int,
+) -> List(Rect) {
   let n = list.length(constraints)
-  case n <= 1 {
-    True -> split(direction, area, constraints)
+  case n == 0 {
+    True -> []
     False -> {
-      let gap_total = int.max(0, spacing) * { n - 1 }
-      let total = case direction {
-        Vertical -> area.size.height
-        Horizontal -> area.size.width
-      }
-      let available = int.max(0, total - gap_total)
-      let sizes = resolve_sizes(available, constraints)
-      build_rects_spaced(direction, area, sizes, int.max(0, spacing), 0, [])
+      let total = axis_length(direction, area)
+      let gap = int.max(0, spacing)
+      let gap_cells = gap * { n - 1 }
+      let sizes = resolve_sizes(int.max(0, total - gap_cells), constraints)
+      let claimed = list.fold(sizes, 0, fn(acc, s) { acc + s }) + gap_cells
+      let leads = flex_leads(flex, n, int.max(0, total - claimed))
+      build_flex_rects(direction, area, sizes, flex_offsets(sizes, leads, gap))
     }
   }
 }
 
-fn build_rects_spaced(
-  direction: Direction,
-  area: Rect,
-  sizes: List(Int),
-  spacing: Int,
-  cursor: Int,
-  acc: List(Rect),
-) -> List(Rect) {
-  let limit = case direction {
+fn axis_length(direction: Direction, area: Rect) -> Int {
+  case direction {
     Vertical -> area.size.height
     Horizontal -> area.size.width
   }
-  case sizes {
-    [] -> list.reverse(acc)
-    [size, ..rest] -> {
-      let start = int.min(cursor, limit)
-      let clamped = int.min(size, int.max(0, limit - start))
+}
+
+// Every flex mode is the same shape: n + 1 places where leftover space can go,
+// one before each child and one after the last, each with a weight. Sharing
+// the leftover out by those weights covers all six modes and keeps the
+// arithmetic exact, so no cell is lost to rounding.
+fn gap_weights(flex: Flex, n: Int) -> List(Int) {
+  let inner = int.max(0, n - 1)
+  case flex {
+    FlexStart -> list.append(list.repeat(0, n), [1])
+    FlexEnd -> [1, ..list.repeat(0, n)]
+    FlexCenter -> [1, ..list.append(list.repeat(0, inner), [1])]
+    FlexBetween -> [0, ..list.append(list.repeat(1, inner), [0])]
+    // Edges carry half an inner gap, so inner gaps weigh twice as much.
+    FlexAround -> [1, ..list.append(list.repeat(2, inner), [1])]
+    FlexEvenly -> list.repeat(1, n + 1)
+  }
+}
+
+// Leftover space to insert before each child, on top of the fixed gap.
+fn flex_leads(flex: Flex, n: Int, leftover: Int) -> List(Int) {
+  let weights = gap_weights(flex, n)
+  let total = list.fold(weights, 0, fn(a, b) { a + b })
+  case total <= 0 {
+    True -> list.repeat(0, n)
+    False -> {
+      let bases = list.map(weights, fn(w) { leftover * w / total })
+      let claimed = list.fold(bases, 0, fn(a, b) { a + b })
+      // Take the first n: the last entry is the space after the last child,
+      // which needs no offset of its own.
+      spread_gap(weights, bases, leftover - claimed, [])
+      |> list.take(n)
+    }
+  }
+}
+
+fn spread_gap(
+  weights: List(Int),
+  bases: List(Int),
+  extra: Int,
+  acc: List(Int),
+) -> List(Int) {
+  case weights, bases {
+    [w, ..w_rest], [b, ..b_rest] ->
+      case w > 0 && extra > 0 {
+        True -> spread_gap(w_rest, b_rest, extra - 1, [b + 1, ..acc])
+        False -> spread_gap(w_rest, b_rest, extra, [b, ..acc])
+      }
+    _, _ -> list.reverse(acc)
+  }
+}
+
+fn flex_offsets(sizes: List(Int), leads: List(Int), gap: Int) -> List(Int) {
+  offsets_loop(sizes, leads, gap, 0, [])
+}
+
+fn offsets_loop(
+  sizes: List(Int),
+  leads: List(Int),
+  gap: Int,
+  cursor: Int,
+  acc: List(Int),
+) -> List(Int) {
+  case sizes, leads {
+    [s, ..s_rest], [lead, ..l_rest] -> {
+      let start = cursor + lead
+      offsets_loop(s_rest, l_rest, gap, start + s + gap, [start, ..acc])
+    }
+    _, _ -> list.reverse(acc)
+  }
+}
+
+fn build_flex_rects(
+  direction: Direction,
+  area: Rect,
+  sizes: List(Int),
+  offsets: List(Int),
+) -> List(Rect) {
+  rects_loop(direction, area, sizes, offsets, axis_length(direction, area), [])
+}
+
+fn rects_loop(
+  direction: Direction,
+  area: Rect,
+  sizes: List(Int),
+  offsets: List(Int),
+  limit: Int,
+  acc: List(Rect),
+) -> List(Rect) {
+  case sizes, offsets {
+    [size, ..s_rest], [offset, ..o_rest] -> {
+      // Clamp so no child can be reported as extending past its parent, even
+      // if a caller hands us constraints the parent cannot hold.
+      let start = int.clamp(offset, 0, limit)
+      let clamped = int.min(size, limit - start)
       let rect = case direction {
         Vertical ->
           Rect(
@@ -876,182 +957,24 @@ fn build_rects_spaced(
             size: Size(width: clamped, height: area.size.height),
           )
       }
-      let next_cursor = case rest {
-        [] -> start + clamped
-        _ -> start + clamped + spacing
-      }
-      build_rects_spaced(direction, area, rest, spacing, next_cursor, [
-        rect,
-        ..acc
-      ])
+      rects_loop(direction, area, s_rest, o_rest, limit, [rect, ..acc])
     }
+    _, _ -> list.reverse(acc)
   }
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Flex layout
-
-/// How to distribute leftover space among children in a flex layout.
+/// Flex layout with a minimum gap between children.
 ///
-/// | Justify      | Description                                             |
-/// |--------------|----------------------------------------------------------|
-/// | `FlexStart`  | Pack children at the start; leftover space at the end.  |
-/// | `FlexEnd`    | Pack children at the end; leftover space at the start.  |
-/// | `FlexCenter` | Center children; leftover space split evenly on both sides. |
-/// | `FlexBetween`| Children spread out; space between them (none at edges). |
-/// | `FlexAround` | Equal space around each child (half at edges).          |
-pub type FlexJustify {
-  FlexStart
-  FlexEnd
-  FlexCenter
-  FlexBetween
-  FlexAround
-}
-
-/// Flex layout: children have fixed sizes (from constraints), leftover space
-/// distributed according to `justify`. Use for toolbars, status bars, centering
-/// a widget in a larger area, or equal-gap grids.
-///
-/// `gap` is the minimum gap between children (cells). Ignored when `justify`
-/// provides its own spacing (Between/Around). With `FlexStart`/`End`/`Center`,
-/// `gap` acts like `split_with_spacing`'s spacing parameter.
-///
-/// ```gleam
-/// // Center a 20-wide widget in a 80-wide area:
-/// split_flex(Horizontal, area, [Length(20)], FlexCenter, 0)
-///
-/// // Three buttons with 2-cell gap between:
-/// split_flex(Horizontal, area, [Length(10), Length(10), Length(10)], FlexStart, 2)
-///
-/// // Toolbar: left item + right item, space between:
-/// split_flex(Horizontal, area, [Length(10), Length(10)], FlexBetween, 0)
-/// ```
+/// Kept for the name; `split_with` is the same function with its arguments in
+/// the order the rest of the module uses.
 pub fn split_flex(
   direction: Direction,
   area: Rect,
   constraints: List(Constraint),
-  justify: FlexJustify,
+  justify: Flex,
   gap: Int,
 ) -> List(Rect) {
-  let n = list.length(constraints)
-  case n == 0 {
-    True -> []
-    False -> {
-      let total = case direction {
-        Vertical -> area.size.height
-        Horizontal -> area.size.width
-      }
-      let gap_cells = int.max(0, gap) * int.max(0, n - 1)
-      let available = int.max(0, total - gap_cells)
-      let sizes = resolve_sizes(available, constraints)
-      let content_width =
-        list.fold(sizes, 0, fn(acc, s) { acc + s }) + gap_cells
-      let leftover = int.max(0, total - content_width)
-      let offsets = flex_offsets(sizes, justify, gap, leftover, n)
-      build_flex_rects(direction, area, sizes, offsets, [])
-    }
-  }
-}
-
-fn flex_offsets(
-  sizes: List(Int),
-  justify: FlexJustify,
-  gap: Int,
-  leftover: Int,
-  n: Int,
-) -> List(Int) {
-  case justify {
-    FlexStart -> start_offsets(sizes, gap, 0, [])
-    FlexEnd -> start_offsets(sizes, gap, leftover, [])
-    FlexCenter -> start_offsets(sizes, gap, leftover / 2, [])
-    FlexBetween -> between_offsets(sizes, leftover, n, 0, [])
-    FlexAround -> around_offsets(sizes, leftover, n, 0, [])
-  }
-}
-
-fn start_offsets(
-  sizes: List(Int),
-  gap: Int,
-  start: Int,
-  acc: List(Int),
-) -> List(Int) {
-  case sizes {
-    [] -> list.reverse(acc)
-    [s, ..rest] -> {
-      let next = start + s + gap
-      start_offsets(rest, gap, next, [start, ..acc])
-    }
-  }
-}
-
-fn between_offsets(
-  sizes: List(Int),
-  leftover: Int,
-  n: Int,
-  cursor: Int,
-  acc: List(Int),
-) -> List(Int) {
-  let gaps = int.max(1, n - 1)
-  let gap_size = case gaps {
-    0 -> 0
-    _ -> leftover / gaps
-  }
-  case sizes {
-    [] -> list.reverse(acc)
-    [s, ..rest] -> {
-      let next = cursor + s + gap_size
-      between_offsets(rest, leftover, n, next, [cursor, ..acc])
-    }
-  }
-}
-
-fn around_offsets(
-  sizes: List(Int),
-  leftover: Int,
-  n: Int,
-  cursor: Int,
-  acc: List(Int),
-) -> List(Int) {
-  let slot = case n {
-    0 -> 0
-    _ -> leftover / n
-  }
-  let half = slot / 2
-  case sizes {
-    [] -> list.reverse(acc)
-    [s, ..rest] -> {
-      let pos = cursor + half
-      let next = pos + s + half + slot % 2
-      around_offsets(rest, leftover, n, next, [pos, ..acc])
-    }
-  }
-}
-
-fn build_flex_rects(
-  direction: Direction,
-  area: Rect,
-  sizes: List(Int),
-  offsets: List(Int),
-  acc: List(Rect),
-) -> List(Rect) {
-  case sizes, offsets {
-    [], _ | _, [] -> list.reverse(acc)
-    [size, ..rest_s], [offset, ..rest_o] -> {
-      let rect = case direction {
-        Vertical ->
-          Rect(
-            position: Position(x: area.position.x, y: area.position.y + offset),
-            size: Size(width: area.size.width, height: size),
-          )
-        Horizontal ->
-          Rect(
-            position: Position(x: area.position.x + offset, y: area.position.y),
-            size: Size(width: size, height: area.size.height),
-          )
-      }
-      build_flex_rects(direction, area, rest_s, rest_o, [rect, ..acc])
-    }
-  }
+  split_with(direction, area, constraints, justify, gap)
 }
 
 // ─────────────────────────────────────────────────────────────────
