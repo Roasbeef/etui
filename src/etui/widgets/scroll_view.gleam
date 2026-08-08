@@ -106,70 +106,14 @@ pub fn render(
         buffer.buffer_new(virtual_area)
         |> render_inner(virtual_area)
 
-      let vis_w = area.size.width
-      let vis_h = area.size.height
-      let ox = int.max(0, state.scroll_x)
-      let oy = int.max(0, state.scroll_y)
-
-      blit(buf, virtual_buf, area, ox, oy, vis_w, vis_h, 0)
-    }
-  }
-}
-
-// Copy cells from virtual_buf at (ox+col, oy+row) into buf at (area.x+col, area.y+row).
-fn blit(
-  buf: buffer.Buffer,
-  virtual_buf: buffer.Buffer,
-  area: geometry.Rect,
-  ox: Int,
-  oy: Int,
-  vis_w: Int,
-  vis_h: Int,
-  row: Int,
-) -> buffer.Buffer {
-  case row >= vis_h {
-    True -> buf
-    False ->
-      blit(
-        blit_row(buf, virtual_buf, area, ox, oy, vis_w, row, 0),
-        virtual_buf,
-        area,
-        ox,
-        oy,
-        vis_w,
-        vis_h,
-        row + 1,
-      )
-  }
-}
-
-fn blit_row(
-  buf: buffer.Buffer,
-  virtual_buf: buffer.Buffer,
-  area: geometry.Rect,
-  ox: Int,
-  oy: Int,
-  vis_w: Int,
-  row: Int,
-  col: Int,
-) -> buffer.Buffer {
-  case col >= vis_w {
-    True -> buf
-    False -> {
-      let src_pos = geometry.Position(x: ox + col, y: oy + row)
-      let dst_pos =
-        geometry.Position(x: area.position.x + col, y: area.position.y + row)
-      let cell = buffer.get_cell(virtual_buf, src_pos)
-      blit_row(
-        buffer.set_cell(buf, dst_pos, cell),
-        virtual_buf,
-        area,
-        ox,
-        oy,
-        vis_w,
-        row,
-        col + 1,
-      )
+      let window =
+        geometry.rect_new(
+          int.max(0, state.scroll_x),
+          int.max(0, state.scroll_y),
+          area.size.width,
+          area.size.height,
+        )
+      buffer.blit(buf, virtual_buf, window, area.position)
     }
   }
 }

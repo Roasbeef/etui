@@ -174,14 +174,73 @@ fn take_prefix(
   }
 }
 
-/// Word-wrap to max_width cells. Handles explicit `\n` newlines.
-/// Returns list of lines, each padded to max_width cells.
+/// Word-wrap to max_width cells.
+///
+/// Line endings are normalised first: `\r\n` and lone `\r` both become `\n`.
+/// A raw `\r` left in the output would occupy zero cells and desynchronise
+/// every position after it.
+///
+/// Tabs are expanded to spaces at 8-column tab stops before wrapping, so a
+/// tab never reaches the buffer (control characters are dropped there).
+///
+/// Returns a list of lines, each at most `max_width` cells wide.
 pub fn wrap(s: String, max_width: Int) -> List(String) {
   case max_width {
     w if w <= 0 -> []
     _ ->
-      string.split(s, "\n")
+      s
+      |> normalise_newlines
+      |> expand_tabs(8)
+      |> string.split("\n")
       |> list.flat_map(fn(para) { wrap_para(para, max_width) })
+  }
+}
+
+/// Normalise `\r\n` and lone `\r` to `\n`.
+///
+/// No `string.contains(s, "\r")` fast path: `\r\n` is a single grapheme
+/// cluster, so `contains` reports False for a `\r` that is followed by `\n`,
+/// which is exactly the case this needs to catch.
+pub fn normalise_newlines(s: String) -> String {
+  s
+  |> string.replace("\r\n", "\n")
+  |> string.replace("\r", "\n")
+}
+
+/// Expand tab characters to spaces, advancing to the next multiple of
+/// `tab_width` cells. Newlines reset the column counter.
+///
+/// ```gleam
+/// text.expand_tabs("a\tb", 4)  // "a   b"
+/// ```
+pub fn expand_tabs(s: String, tab_width: Int) -> String {
+  case string.contains(s, "\t") {
+    False -> s
+    True ->
+      expand_tabs_loop(string.to_graphemes(s), int.max(1, tab_width), 0, "")
+  }
+}
+
+fn expand_tabs_loop(
+  gs: List(String),
+  tab_width: Int,
+  col: Int,
+  acc: String,
+) -> String {
+  case gs {
+    [] -> acc
+    ["\t", ..rest] -> {
+      let pad = tab_width - col % tab_width
+      expand_tabs_loop(
+        rest,
+        tab_width,
+        col + pad,
+        acc <> string.repeat(" ", pad),
+      )
+    }
+    ["\n", ..rest] -> expand_tabs_loop(rest, tab_width, 0, acc <> "\n")
+    [g, ..rest] ->
+      expand_tabs_loop(rest, tab_width, col + grapheme_cell_width(g), acc <> g)
   }
 }
 
@@ -243,6 +302,8 @@ fn wrap_para_words(s: String, max_width: Int) -> List(String) {
 
 // Split a single token into chunks of at most max_width cells.
 // Always produces at least one chunk even if a single grapheme is wider than max_width.
+// Chunks accumulate newest-first and are reversed once, so a long token (a CJK
+// paragraph is one token, it has no spaces) costs O(n), not O(n^2).
 fn hard_break_word(s: String, max_width: Int) -> List(String) {
   hard_break_acc(string.to_graphemes(s), max_width, 0, "", [])
 }
@@ -252,20 +313,21 @@ fn hard_break_acc(
   max_width: Int,
   curr_w: Int,
   curr: String,
-  acc: List(String),
+  rev_acc: List(String),
 ) -> List(String) {
   case gs {
     [] ->
       case curr {
-        "" -> acc
-        _ -> list.append(acc, [curr])
+        "" -> list.reverse(rev_acc)
+        _ -> list.reverse([curr, ..rev_acc])
       }
     [g, ..rest] -> {
       let gw = grapheme_cell_width(g)
       // Flush when adding g would exceed max_width (but always accept the first grapheme).
       case curr_w > 0 && curr_w + gw > max_width {
-        True -> hard_break_acc(rest, max_width, gw, g, list.append(acc, [curr]))
-        False -> hard_break_acc(rest, max_width, curr_w + gw, curr <> g, acc)
+        True -> hard_break_acc(rest, max_width, gw, g, [curr, ..rev_acc])
+        False ->
+          hard_break_acc(rest, max_width, curr_w + gw, curr <> g, rev_acc)
       }
     }
   }

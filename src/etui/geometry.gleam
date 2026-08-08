@@ -124,6 +124,96 @@ pub fn union(a: Rect, b: Rect) -> Rect {
   )
 }
 
+/// Padding removed from each side of a rect: `horizontal` from left and
+/// right, `vertical` from top and bottom.
+pub type Margin {
+  Margin(horizontal: Int, vertical: Int)
+}
+
+/// Shrink a rect by `margin` on all four sides. Collapses to a zero-size rect
+/// (at the centre) rather than going negative.
+///
+/// ```gleam
+/// geometry.inner(area, geometry.Margin(1, 1))  // one cell of padding
+/// ```
+pub fn inner(rect: Rect, margin: Margin) -> Rect {
+  let h = int.max(0, margin.horizontal)
+  let v = int.max(0, margin.vertical)
+  case rect.size.width < 2 * h || rect.size.height < 2 * v {
+    True ->
+      Rect(
+        position: Position(
+          x: rect.position.x + rect.size.width / 2,
+          y: rect.position.y + rect.size.height / 2,
+        ),
+        size: Size(width: 0, height: 0),
+      )
+    False ->
+      Rect(
+        position: Position(x: rect.position.x + h, y: rect.position.y + v),
+        size: Size(
+          width: rect.size.width - 2 * h,
+          height: rect.size.height - 2 * v,
+        ),
+      )
+  }
+}
+
+/// Translate a rect by `dx`, `dy`. Size is unchanged.
+pub fn offset(rect: Rect, dx: Int, dy: Int) -> Rect {
+  Rect(
+    position: Position(x: rect.position.x + dx, y: rect.position.y + dy),
+    size: rect.size,
+  )
+}
+
+/// Move and shrink `rect` so it fits entirely inside `bounds`.
+/// Returns a zero-size rect when the two do not overlap at all.
+pub fn clamp(rect: Rect, bounds: Rect) -> Rect {
+  let w = int.min(rect.size.width, bounds.size.width)
+  let h = int.min(rect.size.height, bounds.size.height)
+  let x = int.clamp(rect.position.x, bounds.position.x, right(bounds) - w)
+  let y = int.clamp(rect.position.y, bounds.position.y, bottom(bounds) - h)
+  Rect(position: Position(x: x, y: y), size: Size(width: w, height: h))
+}
+
+/// The rect's size, dropping its position.
+pub fn size(rect: Rect) -> Size {
+  rect.size
+}
+
+/// One 1-cell-tall rect per row of `rect`, top to bottom.
+pub fn rows(rect: Rect) -> List(Rect) {
+  list.map(indices(rect.size.height), fn(i) {
+    Rect(
+      position: Position(x: rect.position.x, y: rect.position.y + i),
+      size: Size(width: rect.size.width, height: 1),
+    )
+  })
+}
+
+/// One 1-cell-wide rect per column of `rect`, left to right.
+pub fn columns(rect: Rect) -> List(Rect) {
+  list.map(indices(rect.size.width), fn(i) {
+    Rect(
+      position: Position(x: rect.position.x + i, y: rect.position.y),
+      size: Size(width: 1, height: rect.size.height),
+    )
+  })
+}
+
+// [0, 1, .., n-1]; empty for n <= 0.
+fn indices(n: Int) -> List(Int) {
+  indices_acc(n - 1, [])
+}
+
+fn indices_acc(i: Int, acc: List(Int)) -> List(Int) {
+  case i < 0 {
+    True -> acc
+    False -> indices_acc(i - 1, [i, ..acc])
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Core algorithm: resolve_sizes
 

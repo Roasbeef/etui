@@ -403,36 +403,196 @@ pub fn set_string_linked(
 }
 
 /// Clear all cells in a rect (reset to empty_cell).
+/// The rect is clipped to the buffer first, so the inner loop needs no
+/// per-cell bounds check and the `Buffer` record is rebuilt once, not per cell.
 pub fn clear(buffer: Buffer, rect: geometry.Rect) -> Buffer {
-  let y_max = geometry.bottom(rect)
-  let x_max = geometry.right(rect)
-  clear_rows(buffer, rect.position.y, y_max, rect.position.x, x_max)
-}
-
-fn clear_rows(
-  buf: Buffer,
-  y: Int,
-  y_max: Int,
-  x_min: Int,
-  x_max: Int,
-) -> Buffer {
-  case y >= y_max {
-    True -> buf
-    False ->
-      clear_rows(clear_row(buf, y, x_min, x_max), y + 1, y_max, x_min, x_max)
+  case geometry.intersect(buffer.area, rect) {
+    Error(_) -> buffer
+    Ok(r) ->
+      Buffer(
+        ..buffer,
+        cells: clear_rows(
+          buffer.area,
+          buffer.cells,
+          r,
+          empty_cell(),
+          r.position.y,
+        ),
+      )
   }
 }
 
-fn clear_row(buf: Buffer, y: Int, x: Int, x_max: Int) -> Buffer {
-  case x >= x_max {
-    True -> buf
+fn clear_rows(
+  area: geometry.Rect,
+  cells: CellArray,
+  r: geometry.Rect,
+  blank: Cell,
+  y: Int,
+) -> CellArray {
+  case y >= geometry.bottom(r) {
+    True -> cells
     False -> {
-      let pos = geometry.Position(x: x, y: y)
-      let cells = case geometry.contains(buf.area, pos) {
-        True -> array_set(pos_to_idx(buf.area, pos), empty_cell(), buf.cells)
-        False -> buf.cells
+      let base = row_base(area, y)
+      let cells2 =
+        clear_row(cells, blank, base + r.position.x, base + geometry.right(r))
+      clear_rows(area, cells2, r, blank, y + 1)
+    }
+  }
+}
+
+fn clear_row(
+  cells: CellArray,
+  blank: Cell,
+  idx: Int,
+  idx_max: Int,
+) -> CellArray {
+  case idx >= idx_max {
+    True -> cells
+    False -> clear_row(array_set(idx, blank, cells), blank, idx + 1, idx_max)
+  }
+}
+
+// Flat index of column 0 of row `y`, biased by the area origin so that
+// `row_base(area, y) + x` is the index of cell (x, y).
+fn row_base(area: geometry.Rect, y: Int) -> Int {
+  { y - area.position.y } * area.size.width - area.position.x
+}
+
+/// Copy `src_rect` out of `src` into `dst`, placing its top-left at `dst_pos`.
+/// Clipped against both buffers; anything outside either is skipped.
+///
+/// Use to composite an off-screen buffer (a scroll canvas, a cached panel)
+/// into the frame without going cell by cell from the caller.
+pub fn blit(
+  dst: Buffer,
+  src: Buffer,
+  src_rect: geometry.Rect,
+  dst_pos: geometry.Position,
+) -> Buffer {
+  let dx = dst_pos.x - src_rect.position.x
+  let dy = dst_pos.y - src_rect.position.y
+  case geometry.intersect(src.area, src_rect) {
+    Error(_) -> dst
+    Ok(s) -> {
+      let translated =
+        geometry.Rect(
+          position: geometry.Position(
+            x: s.position.x + dx,
+            y: s.position.y + dy,
+          ),
+          size: s.size,
+        )
+      case geometry.intersect(dst.area, translated) {
+        Error(_) -> dst
+        Ok(d) ->
+          Buffer(
+            ..dst,
+            cells: blit_rows(src, dst.area, dst.cells, d, dx, dy, d.position.y),
+          )
       }
-      clear_row(Buffer(..buf, cells: cells), y, x + 1, x_max)
+    }
+  }
+}
+
+fn blit_rows(
+  src: Buffer,
+  dst_area: geometry.Rect,
+  cells: CellArray,
+  d: geometry.Rect,
+  dx: Int,
+  dy: Int,
+  y: Int,
+) -> CellArray {
+  case y >= geometry.bottom(d) {
+    True -> cells
+    False -> {
+      // Indices are expressed in destination-x, so the source base absorbs dx.
+      let src_base = row_base(src.area, y - dy) - dx
+      let dst_base = row_base(dst_area, y)
+      let cells2 =
+        blit_row(
+          src.cells,
+          cells,
+          src_base,
+          dst_base,
+          d.position.x,
+          geometry.right(d),
+        )
+      blit_rows(src, dst_area, cells2, d, dx, dy, y + 1)
+    }
+  }
+}
+
+fn blit_row(
+  src_cells: CellArray,
+  cells: CellArray,
+  src_base: Int,
+  dst_base: Int,
+  x: Int,
+  x_max: Int,
+) -> CellArray {
+  case x >= x_max {
+    True -> cells
+    False ->
+      blit_row(
+        src_cells,
+        array_set(dst_base + x, array_get(src_base + x, src_cells), cells),
+        src_base,
+        dst_base,
+        x + 1,
+        x_max,
+      )
+  }
+}
+
+/// Restyle every cell in `rect`, keeping its content.
+/// Use to tint a region (selection highlight, disabled panel) after the
+/// content has been drawn.
+pub fn set_style(
+  buffer: Buffer,
+  rect: geometry.Rect,
+  s: style.Style,
+) -> Buffer {
+  case geometry.intersect(buffer.area, rect) {
+    Error(_) -> buffer
+    Ok(r) ->
+      Buffer(
+        ..buffer,
+        cells: style_rows(buffer.area, buffer.cells, r, s, r.position.y),
+      )
+  }
+}
+
+fn style_rows(
+  area: geometry.Rect,
+  cells: CellArray,
+  r: geometry.Rect,
+  s: style.Style,
+  y: Int,
+) -> CellArray {
+  case y >= geometry.bottom(r) {
+    True -> cells
+    False -> {
+      let base = row_base(area, y)
+      let cells2 =
+        style_row(cells, s, base + r.position.x, base + geometry.right(r))
+      style_rows(area, cells2, r, s, y + 1)
+    }
+  }
+}
+
+fn style_row(
+  cells: CellArray,
+  s: style.Style,
+  idx: Int,
+  idx_max: Int,
+) -> CellArray {
+  case idx >= idx_max {
+    True -> cells
+    False -> {
+      let cell = array_get(idx, cells)
+      let restyled = Cell(..cell, fg: s.fg, bg: s.bg, modifier: s.modifier)
+      style_row(array_set(idx, restyled, cells), s, idx + 1, idx_max)
     }
   }
 }
