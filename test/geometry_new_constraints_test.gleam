@@ -4,6 +4,7 @@ import etui/geometry.{
   Fill, Horizontal, Length, Max, Min, Percentage, Ratio, Vertical, rect_new,
   resolve_sizes, split, split_with_spacing,
 }
+import gleam/list
 import gleeunit/should
 
 // ─────────────────────────────────────────────────────────────────
@@ -51,10 +52,34 @@ pub fn min_gets_base_share_test() {
   |> should.equal([50, 50])
 }
 
-pub fn min_enforces_floor_test() {
-  // Length(80) used, flex_budget=20. Min(30): base=20 < 30, so gets 30.
+pub fn min_floor_is_capped_by_the_remaining_budget_test() {
+  // Length(80) leaves 20 cells. Min(30) cannot have its floor, and handing it
+  // 30 anyway produced 110 cells of sizes for a 100-cell area; build_rects
+  // then truncated the overflow, so the reported size was a lie.
   resolve_sizes(100, [Length(80), Min(30)])
-  |> should.equal([80, 30])
+  |> should.equal([80, 20])
+}
+
+pub fn equal_minimums_that_do_not_fit_stay_equal_test() {
+  // Both ask for 60 of a 100-cell budget. Neither can have it, so they share.
+  // Previously this resolved to [60, 60] and the second was truncated to 40.
+  resolve_sizes(100, [Min(60), Min(60)])
+  |> should.equal([50, 50])
+}
+
+pub fn unequal_minimums_that_do_not_fit_scale_in_proportion_test() {
+  // Base share is 50, so Min(60) wants 60 and Min(30) wants 50: 110 in total.
+  // Scaled back to 100 they keep their ratio and still fill the area exactly.
+  let sizes = resolve_sizes(100, [Min(60), Min(30)])
+  sizes
+  |> should.equal([54, 46])
+  list.fold(sizes, 0, fn(a, b) { a + b })
+  |> should.equal(100)
+}
+
+pub fn a_minimum_that_fits_is_still_honoured_test() {
+  resolve_sizes(100, [Min(60), Fill])
+  |> should.equal([60, 40])
 }
 
 pub fn min_with_fill_test() {

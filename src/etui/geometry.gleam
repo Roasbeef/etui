@@ -220,7 +220,10 @@ fn indices_acc(i: Int, acc: List(Int)) -> List(Int) {
 /// 2. Percentage + Ratio, proportional from total. Cumulative to prevent jitter.
 ///    Scaled proportionally if combined demand exceeds available budget.
 /// 3. Fill + Min + Max, divide remaining equally.
-///    Min applies a floor; Max applies a ceiling. Fill gets equal share.
+///    Min applies a floor; Max applies a ceiling. Fill absorbs what is left.
+///    When the floors add up to more than the budget none of them can be
+///    honoured, so they are scaled to fit rather than over-allocated: the
+///    returned sizes always fit the area they were asked to fill.
 pub fn resolve_sizes(total: Int, constraints: List(Constraint)) -> List(Int) {
   case total < 0 {
     True -> list.map(constraints, fn(_) { 0 })
@@ -276,14 +279,7 @@ fn resolve_sizes_impl(total: Int, constraints: List(Constraint)) -> List(Int) {
 
   // Phase 3: Fill + Min + Max (flexible, divide remaining)
   let flex_budget = int.max(0, total - length_used - pct_used - ratio_used)
-  let flex_count =
-    list.count(constraints, fn(c) {
-      case c {
-        Fill | Min(_) | Max(_) -> True
-        _ -> False
-      }
-    })
-  let flex_sizes = phase_flex(constraints, flex_count, flex_budget, 0, [])
+  let flex_sizes = phase_flex(constraints, flex_budget)
 
   assemble_sizes(
     constraints,
@@ -378,68 +374,89 @@ fn phase_proportional(
   }
 }
 
-// Flexible allocation for Fill, Min, Max.
-// Two-sub-pass algorithm so Fill always consumes the full budget:
-//   1) Compute each Min/Max's effective size at base share.
-//   2) Distribute remaining budget equally among Fill constraints.
-// This guarantees sum(flex_sizes) = budget (before build_rects clamping).
-fn phase_flex(
-  constraints: List(Constraint),
-  flex_count: Int,
-  budget: Int,
-  _idx: Int,
-  _acc: List(Int),
-) -> List(Int) {
+// Flexible allocation for Fill, Min and Max.
+//
+// Min and Max take their fair share of the leftover, bounded by their floor or
+// ceiling; Fill then absorbs whatever is still unclaimed. Two sub-passes are
+// enough because only Fill grows, so clamping a bound cannot change what the
+// other bounds resolve to.
+//
+// The exception is over-subscription: a set of floors can add up to more than
+// the budget. `[Min(60), Min(60)]` on 100 used to resolve to `[60, 60]`, 120
+// cells, and build_rects then truncated the second to 40, so two identical
+// constraints came out different sizes. When the bounded sizes do not fit,
+// they are scaled to the budget instead, which keeps equal constraints equal.
+fn phase_flex(constraints: List(Constraint), budget: Int) -> List(Int) {
+  let flex_count =
+    list.count(constraints, fn(c) {
+      case c {
+        Fill | Min(_) | Max(_) -> True
+        _ -> False
+      }
+    })
   case flex_count {
     0 -> list.map(constraints, fn(_) { 0 })
     _ -> {
       let base = budget / flex_count
-      // Sub-pass 1: compute total claimed by Min/Max at their effective sizes.
-      let min_max_used =
-        list.fold(constraints, 0, fn(acc, c) {
+      // Sub-pass 1: what each Min/Max resolves to at the base share.
+      let bounded =
+        list.map(constraints, fn(c) {
           case c {
-            Min(n) -> acc + int.max(n, base)
-            Max(n) -> acc + int.min(n, base)
-            _ -> acc
+            Min(n) -> int.max(n, base)
+            Max(n) -> int.min(n, base)
+            _ -> 0
           }
         })
-      let fill_count =
-        list.count(constraints, fn(c) {
-          case c {
-            Fill -> True
-            _ -> False
-          }
-        })
-      let fill_budget = int.max(0, budget - min_max_used)
-      let fill_base = case fill_count {
-        0 -> 0
-        _ -> fill_budget / fill_count
+      let bounded_used = list.fold(bounded, 0, fn(a, b) { a + b })
+      case bounded_used > budget {
+        True -> {
+          // The bounds alone over-subscribe the budget, so none of them can be
+          // honoured. Share out in proportion to what each asked for; Fill,
+          // having asked for nothing here, gets nothing.
+          let #(sizes, _) =
+            phase_proportional(bounded, budget, bounded_used, 0, 0, [])
+          sizes
+        }
+        False -> fill_remainder(constraints, bounded, budget - bounded_used)
       }
-      let fill_rem = case fill_count {
-        0 -> 0
-        _ -> fill_budget % fill_count
-      }
-      // Sub-pass 2: assign sizes.
-      let #(sizes, _) =
-        list.fold(constraints, #([], 0), fn(state, c) {
-          let #(acc, fill_idx) = state
-          let #(size, new_fill_idx) = case c {
-            Fill -> {
-              let s = case fill_idx < fill_rem {
-                True -> fill_base + 1
-                False -> fill_base
-              }
-              #(s, fill_idx + 1)
-            }
-            Min(n) -> #(int.max(n, base), fill_idx)
-            Max(n) -> #(int.min(n, base), fill_idx)
-            _ -> #(0, fill_idx)
-          }
-          #([size, ..acc], new_fill_idx)
-        })
-      list.reverse(sizes)
     }
   }
+}
+
+// Sub-pass 2: split what the bounds left over among the Fill constraints,
+// remainder cells going to the earliest ones.
+fn fill_remainder(
+  constraints: List(Constraint),
+  bounded: List(Int),
+  fill_budget: Int,
+) -> List(Int) {
+  let fill_count =
+    list.count(constraints, fn(c) {
+      case c {
+        Fill -> True
+        _ -> False
+      }
+    })
+  let #(fill_base, fill_extra) = case fill_count {
+    0 -> #(0, 0)
+    _ -> #(fill_budget / fill_count, fill_budget % fill_count)
+  }
+  let #(sizes, _) =
+    list.fold(list.zip(constraints, bounded), #([], 0), fn(state, pair) {
+      let #(acc, fill_idx) = state
+      let #(c, bounded_size) = pair
+      case c {
+        Fill -> {
+          let size = case fill_idx < fill_extra {
+            True -> fill_base + 1
+            False -> fill_base
+          }
+          #([size, ..acc], fill_idx + 1)
+        }
+        _ -> #([bounded_size, ..acc], fill_idx)
+      }
+    })
+  list.reverse(sizes)
 }
 
 fn assemble_sizes(
