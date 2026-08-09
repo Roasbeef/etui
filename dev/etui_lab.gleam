@@ -81,6 +81,7 @@ pub type Screen {
   Styles
   Input
   Scroll
+  Prose
 }
 
 pub type Model {
@@ -97,6 +98,8 @@ pub type Model {
     list_state: list_w.ListState,
     /// Where the last mouse press landed, and which pane it hit.
     last_hit: String,
+    /// Width the TEXT screen wraps to, so the reflow can be watched.
+    prose_width: Int,
     quit: Bool,
   )
 }
@@ -110,6 +113,7 @@ pub fn initial() -> Model {
     pasted: "",
     list_state: list_w.state_new(),
     last_hit: "nothing yet",
+    prose_width: 34,
     quit: False,
   )
 }
@@ -151,6 +155,11 @@ fn on_key(key: String, m: Model) -> Model {
     "2", _ -> Model(..m, screen: Styles)
     "3", _ -> Model(..m, screen: Input)
     "4", _ -> Model(..m, screen: Scroll)
+    "5", _ -> Model(..m, screen: Prose)
+
+    // TEXT: narrow and widen the wrap column
+    "left", Prose -> Model(..m, prose_width: int.max(8, m.prose_width - 2))
+    "right", Prose -> Model(..m, prose_width: int.min(60, m.prose_width + 2))
 
     // LAYOUT: cycle the highlighted mode, change the weight
     "tab", Layout ->
@@ -233,6 +242,7 @@ fn chrome(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
         #("2 STYLE", Styles),
         #("3 INPUT", Input),
         #("4 SCROLL", Scroll),
+        #("5 TEXT", Prose),
       ],
       fn(entry) {
         let #(label, which) = entry
@@ -256,7 +266,7 @@ fn chrome(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
   |> line_at(0, 1, w, [tinted(string.repeat("─", w), muted)])
   |> line_at(0, h - 1, w, [
     styled(
-      text.pad_right(" 1-4 screens   TAB cycle   q quit", w),
+      text.pad_right(" 1-5 screens   TAB cycle   ←/→ adjust   q quit", w),
       style.Style(
         fg: muted,
         bg: bar_bg,
@@ -767,6 +777,94 @@ fn scroll_panes(area: Rect) -> List(Rect) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// 5 TEXT
+
+/// One styled sentence. The styles are what has to survive the reflow.
+fn prose() -> span.Text {
+  span.text_new([
+    span.line_new([
+      span.span_styled(
+        "ERROR",
+        style.default_style()
+          |> style.with_fg(warn)
+          |> style.add_modifier(style.bold()),
+      ),
+      plain(" the disk holding "),
+      span.span_styled(
+        "/var/log",
+        style.default_style()
+          |> style.add_modifier(style.underline()),
+      ),
+      plain(" filled up while rotating "),
+      span.span_styled(
+        "etui.log",
+        style.default_style()
+          |> style.with_fg(accent),
+      ),
+      plain(", so nothing has been written since."),
+    ]),
+  ])
+}
+
+fn render_prose(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
+  let area = body(screen)
+  let x = area.position.x
+  let w = area.size.width
+  let buf =
+    heading(
+      buf,
+      area,
+      "WRAPPING THAT KEEPS THE STYLES",
+      "←/→ changes the column. Colours and underline must follow their words.",
+    )
+
+  let top = area.position.y + 3
+  let column = int.min(m.prose_width, int.max(8, w / 2 - 3))
+  let wrapped_area = rect_new(x, top + 1, column, 8)
+  let flat_area = rect_new(x + column + 4, top + 1, column, 8)
+
+  let buf =
+    buf
+    |> line_at(x, top, column, [
+      tinted("render_text, width " <> int.to_string(column), accent),
+    ])
+    |> line_at(x + column + 4, top, column, [
+      tinted("render_styled, same width", muted),
+    ])
+    |> paragraph.render_text(wrapped_area, prose())
+    // The same content without wrapping, which is what the old span path did:
+    // one row, everything past the edge gone.
+    |> paragraph.render_styled(flat_area, prose().lines)
+
+  let checks = area.position.y + 13
+  let buf =
+    heading(
+      buf,
+      rect_new(x, checks, w, 2),
+      "TEXT THAT USED TO BREAK",
+      "each row must be exactly as wide as its label claims.",
+    )
+  let rows = [
+    #("tabs", "a\\tb\\tc expands to 8-column stops", "a\tb\tc"),
+    #("CRLF", "a\\r\\nb is two rows, no stray CR", "a\r\nb"),
+    #("wide", "four CJK graphemes are eight cells", "漢字漢字"),
+  ]
+  list.index_fold(rows, buf, fn(acc, entry, i) {
+    let #(name, why, sample) = entry
+    let y = checks + 3 + i * 2
+    let lines = text.wrap(sample, 30)
+    let shown = string.join(lines, " ⏎ ")
+    acc
+    |> line_at(x, y, w, [
+      tinted(text.pad_right(name, 8), muted),
+      plain(text.pad_right(shown, 22)),
+      tinted("cells=" <> int.to_string(text.cell_width(shown)) <> "  ", accent),
+      tinted(why, muted),
+    ])
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Render
 //
 // Returns the panes the SCROLL screen drew, so the loop can match a click
@@ -781,6 +879,7 @@ pub fn render(m: Model, screen: Rect) -> #(buffer.Buffer, Model, List(Rect)) {
     Styles -> render_styles(base, screen)
     Input -> render_input(base, m, screen)
     Scroll -> render_scroll(base, m, screen, settled)
+    Prose -> render_prose(base, m, screen)
   }
   #(buf, Model(..m, list_state: settled), scroll_panes(body(screen)))
 }

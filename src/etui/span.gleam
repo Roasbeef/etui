@@ -293,21 +293,80 @@ pub fn wrap_line(l: Line, width: Int) -> List(Line) {
   }
 }
 
-// A word carries the span it came from, so its style survives being moved.
+// A word, which may be made of pieces from more than one span: "etui.log"
+// styled one way followed immediately by "," styled another is a single word
+// and must never be split by the wrapper.
+//
+// Splitting each span on spaces independently and rejoining with spaces put a
+// space between those two, inventing whitespace the source never had.
+type Piece {
+  Piece(content: String, style: Span)
+}
+
 type Word {
-  Word(content: String, style: Span)
+  Word(pieces: List(Piece))
+}
+
+fn word_width(w: Word) -> Int {
+  list.fold(w.pieces, 0, fn(acc, p) { acc + text.cell_width(p.content) })
+}
+
+fn word_text(w: Word) -> String {
+  string.concat(list.map(w.pieces, fn(p) { p.content }))
 }
 
 fn tokenise(spans: List(Span), acc: List(Word)) -> List(Word) {
+  let #(words, pending) = tokenise_loop(spans, [], [])
+  let all = case pending {
+    [] -> words
+    _ -> [Word(pieces: list.reverse(pending)), ..words]
+  }
+  let _ = acc
+  list.reverse(all)
+}
+
+// `pending` is the word being built, newest piece first. A span boundary only
+// ends a word when there is a space at it.
+fn tokenise_loop(
+  spans: List(Span),
+  pending: List(Piece),
+  done: List(Word),
+) -> #(List(Word), List(Piece)) {
   case spans {
-    [] -> list.reverse(acc)
+    [] -> #(done, pending)
     [sp, ..rest] -> {
-      let words =
-        sp.content
-        |> string.split(" ")
-        |> list.filter(fn(w) { w != "" })
-        |> list.map(fn(w) { Word(content: w, style: sp) })
-      tokenise(rest, list.append(list.reverse(words), acc))
+      let #(next_pending, next_done) =
+        absorb(string.split(sp.content, " "), sp, pending, done, True)
+      tokenise_loop(rest, next_pending, next_done)
+    }
+  }
+}
+
+fn absorb(
+  parts: List(String),
+  sp: Span,
+  pending: List(Piece),
+  done: List(Word),
+  first: Bool,
+) -> #(List(Piece), List(Word)) {
+  case parts {
+    [] -> #(pending, done)
+    [part, ..rest] -> {
+      // Every part after the first was preceded by a space, so it starts a new
+      // word; the first one continues whatever was already being built.
+      let #(carry, closed) = case first {
+        True -> #(pending, done)
+        False ->
+          case pending {
+            [] -> #([], done)
+            _ -> #([], [Word(pieces: list.reverse(pending)), ..done])
+          }
+      }
+      let grown = case part {
+        "" -> carry
+        _ -> [Piece(content: part, style: sp), ..carry]
+      }
+      absorb(rest, sp, grown, closed, False)
     }
   }
 }
@@ -327,58 +386,65 @@ fn pack(
         ..done
       ])
     [w, ..rest] -> {
-      let word_width = text.cell_width(w.content)
+      let this_width = word_width(w)
       let gap = case current {
         [] -> 0
         _ -> 1
       }
-      case current_width + gap + word_width <= width {
+      case current_width + gap + this_width <= width {
         True ->
           pack(
             rest,
             width,
             alignment,
-            current_width + gap + word_width,
-            push(current, spaced(w.content, gap), w.style),
+            current_width + gap + this_width,
+            push_word(current, w, gap),
             done,
           )
         False ->
-          case word_width <= width {
+          case this_width <= width {
             // Starts the next row whole.
             True ->
               pack(
                 rest,
                 width,
                 alignment,
-                word_width,
-                push([], w.content, w.style),
+                this_width,
+                push_word([], w, 0),
                 flush(current, alignment, done),
               )
-            // Wider than any row: break it across rows.
+            // Wider than any row: break it across rows. A word this long is
+            // treated as one style, its first, rather than tracking where each
+            // piece falls inside the break.
             False -> {
+              let proto = case w.pieces {
+                [Piece(style: st, ..), ..] -> st
+                [] -> span_plain("")
+              }
+              let flat = word_text(w)
               let #(head, tail) =
-                split_at_width(w.content, width - current_width - gap)
+                split_at_width(flat, width - current_width - gap)
               case head {
                 "" -> {
-                  let #(h2, t2) = split_at_width(w.content, width)
+                  let #(h2, t2) = split_at_width(flat, width)
                   pack(
-                    [Word(content: t2, style: w.style), ..rest],
+                    [Word(pieces: [Piece(content: t2, style: proto)]), ..rest],
                     width,
                     alignment,
                     text.cell_width(h2),
-                    push([], h2, w.style),
+                    push([], h2, proto),
                     flush(current, alignment, done),
                   )
                 }
                 _ ->
                   pack(
-                    [Word(content: tail, style: w.style), ..rest],
+                    [Word(pieces: [Piece(content: tail, style: proto)]), ..rest],
                     width,
                     alignment,
                     0,
                     [],
                     flush(
-                      push(current, spaced(head, gap), w.style),
+                      push(current, spaced(head, gap), proto),
                       alignment,
                       done,
                     ),
@@ -388,6 +454,19 @@ fn pack(
           }
       }
     }
+  }
+}
+
+// Push a whole word, piece by piece, so each keeps its own style.
+fn push_word(current: List(Span), w: Word, gap: Int) -> List(Span) {
+  case w.pieces {
+    [] -> current
+    [first, ..rest] ->
+      list.fold(
+        rest,
+        push(current, spaced(first.content, gap), first.style),
+        fn(acc, piece) { push(acc, piece.content, piece.style) },
+      )
   }
 }
 

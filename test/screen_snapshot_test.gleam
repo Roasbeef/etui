@@ -260,7 +260,7 @@ pub fn the_scroll_screen_reports_the_rows_it_was_given_test() {
 }
 
 pub fn every_lab_screen_fills_its_width_test() {
-  list.each(["1", "2", "3", "4"], fn(key) {
+  list.each(["1", "2", "3", "4", "5"], fn(key) {
     list.each([#(80, 24), #(120, 32)], fn(size) {
       let #(width, height) = size
       let buf = lab_frame(key, width, height)
@@ -270,4 +270,24 @@ pub fn every_lab_screen_fills_its_width_test() {
       })
     })
   })
+}
+
+pub fn the_text_screen_keeps_words_whole_across_styles_test() {
+  // "etui.log" and the comma after it come from different spans with no space
+  // between them, so they are one word. An earlier wrapper split each span on
+  // spaces and rejoined with spaces, inventing a space and pushing the comma
+  // onto the next row.
+  let buf = lab_frame("5", 96, 28)
+  let joined =
+    indices(4)
+    |> list.map(fn(i) { row_text(buf, i + 6, 40) })
+    |> string.join(" ")
+  string.contains(joined, "etui.log,")
+  |> should.equal(True)
+}
+
+pub fn the_text_screen_expands_tabs_test() {
+  let buf = lab_frame("5", 96, 28)
+  string.contains(row_text(buf, 18, 96), "cells=17")
+  |> should.equal(True)
 }

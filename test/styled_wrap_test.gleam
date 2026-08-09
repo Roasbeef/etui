@@ -226,3 +226,46 @@ fn read_row(buf: buffer.Buffer, y: Int, x: Int, w: Int, acc: String) -> String {
       )
   }
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Words that span a style boundary
+
+pub fn punctuation_in_another_style_stays_attached_test() {
+  // "etui.log" and "," are adjacent with no space between them, so they are
+  // one word. Splitting each span on spaces and rejoining with spaces put a
+  // space between them that the source never had.
+  let line =
+    span.line_new([
+      span.span_plain("rotating "),
+      span.span_bold("etui.log"),
+      span.span_plain(", nothing since"),
+    ])
+  rendered(span.wrap(one(line), 40))
+  |> should.equal(["rotating etui.log, nothing since"])
+}
+
+pub fn a_word_split_across_styles_is_never_broken_by_the_wrap_test() {
+  // The word is 12 cells and the column is 14, so it fits only if it is kept
+  // whole. If the wrapper treated the two halves as separate words it would
+  // insert a space and push one of them to the next row.
+  let line =
+    span.line_new([
+      span.span_plain("x "),
+      span.span_bold("half"),
+      span.span_plain("andhalf"),
+    ])
+  rendered(span.wrap(one(line), 14))
+  |> should.equal(["x halfandhalf"])
+}
+
+pub fn each_half_of_such_a_word_keeps_its_own_style_test() {
+  let line = span.line_new([span.span_bold("half"), span.span_plain("andhalf")])
+  styles_of(span.wrap(one(line), 20))
+  |> should.equal([[#("half", True), #("andhalf", False)]])
+}
+
+pub fn a_trailing_space_still_ends_a_word_test() {
+  let line = span.line_new([span.span_bold("one "), span.span_plain("two")])
+  rendered(span.wrap(one(line), 3))
+  |> should.equal(["one", "two"])
+}
