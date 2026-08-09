@@ -335,3 +335,16 @@ fn row_text_at(buf: buffer.Buffer, y: Int, x0: Int, width: Int) -> String {
   })
   |> string.concat
 }
+
+pub fn the_input_screen_decodes_modified_keys_test() {
+  // The raw string and what keys.parse makes of it, side by side. The second
+  // is what a case expression should be matching on, so the bench shows it.
+  let model =
+    etui_lab.initial()
+    |> etui_lab.update(backend.KeyPress("3"), _)
+    |> etui_lab.update(backend.KeyPress("ctrl+shift+left"), _)
+  let #(buf, _settled, _panes) =
+    etui_lab.render(model, geometry.rect_new(0, 0, 96, 22))
+  string.contains(row_text(buf, 6, 60), "Left + ctrl,shift")
+  |> should.equal(True)
+}

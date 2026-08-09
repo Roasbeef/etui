@@ -20,6 +20,7 @@ import etui/geometry.{
   type Rect, Fill, FillWeighted, FlexAround, FlexBetween, FlexCenter, FlexEnd,
   FlexEvenly, FlexStart, Horizontal, Length, Percentage, rect_new,
 }
+import etui/keys
 import etui/span
 import etui/style
 import etui/text
@@ -197,7 +198,10 @@ fn coords(x: Int, y: Int) -> String {
 /// that this is not a guess: it is the string your own `case` will match on.
 fn describe(event: backend.InputEvent) -> String {
   case event {
-    backend.KeyPress(k) -> "KeyPress " <> string.inspect(k)
+    // Both the string the parser produced and what keys.parse makes of it,
+    // because the second is the one a `case` should be matching on.
+    backend.KeyPress(k) ->
+      "KeyPress " <> string.inspect(k) <> "  " <> decoded(k)
     backend.Paste(t) ->
       "Paste "
       <> int.to_string(string.length(t))
@@ -218,6 +222,34 @@ fn describe(event: backend.InputEvent) -> String {
       }
     backend.Resize(w, h) -> "Resize " <> coords(w, h)
     backend.Tick -> "Tick"
+  }
+}
+
+/// `keys.parse` in one line: the code, and what was held with it.
+fn decoded(raw: String) -> String {
+  let event = keys.parse(raw)
+  let held = case keys.is_plain(event.modifiers) {
+    True -> ""
+    False -> " + " <> held_names(event.modifiers)
+  }
+  "-> " <> code_label(event.code) <> held
+}
+
+fn held_names(m: keys.Modifiers) -> String {
+  [#(m.ctrl, "ctrl"), #(m.alt, "alt"), #(m.shift, "shift")]
+  |> list.filter(fn(pair) { pair.0 })
+  |> list.map(fn(pair) { pair.1 })
+  |> string.join(",")
+}
+
+fn code_label(code: keys.Key) -> String {
+  case code {
+    keys.Char(c) -> "Char(" <> c <> ")"
+    keys.F(n) -> "F(" <> int.to_string(n) <> ")"
+    keys.Ctrl(c) -> "Ctrl(" <> c <> ")"
+    keys.Alt(c) -> "Alt(" <> c <> ")"
+    keys.Unknown(_) -> "Unknown"
+    other -> string.inspect(other)
   }
 }
 
@@ -597,8 +629,8 @@ fn render_input(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
       let buf = block.render(buf, hint_col, hint_blk)
       let tips = [
         #("hold ↓", "one event per repeat, none lost"),
-        #("ctrl+→", "arrives as \"ctrl+right\""),
-        #("shift+←", "arrives as \"shift+left\""),
+        #("ctrl+→", "Right + ctrl, as data"),
+        #("shift+←", "Left + shift, as data"),
         #("paste", "one Paste event, not N keys"),
         #("drag", "MouseDrag, not a run of presses"),
         #("wheel", "MouseScroll up/down"),
