@@ -16,8 +16,9 @@
 import etui/anim
 import etui/backend
 import etui/buffer
-import etui/geometry.{type Rect, Position}
+import etui/geometry.{Position}
 import etui/text
+import etui_lab
 import etui_showcase
 import gleam/list
 import gleam/string
@@ -204,4 +205,69 @@ pub fn the_tree_tab_renders_as_expected_test() {
     "                                                            ",
     " GATUI EXPLORER ● TREE jk nav  ↵ toggle  TAB switch  q quit ",
   ])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// The 2.0 bench
+//
+// etui_lab drives its own loop over etui/terminal, so its render is a plain
+// function and can be checked the same way. These pin the two screens whose
+// correctness is a matter of exact cell positions.
+
+fn lab_frame(key: String, width: Int, height: Int) -> buffer.Buffer {
+  let model = etui_lab.update(backend.KeyPress(key), etui_lab.initial())
+  let #(buf, _settled, _panes) =
+    etui_lab.render(model, geometry.rect_new(0, 0, width, height))
+  buf
+}
+
+pub fn the_six_flex_modes_are_all_different_test() {
+  // If two modes ever render identically, one of them is not doing its job.
+  let buf = lab_frame("1", 92, 22)
+  let strips =
+    indices(6)
+    |> list.map(fn(i) { row_text(buf, i + 5, 92) })
+  list.length(list.unique(strips))
+  |> should.equal(6)
+}
+
+pub fn flex_start_packs_left_and_flex_end_packs_right_test() {
+  let buf = lab_frame("1", 92, 22)
+  let start = row_text(buf, 5, 92)
+  let end = row_text(buf, 6, 92)
+  string.contains(string.slice(start, 14, 20), "██████")
+  |> should.equal(True)
+  string.contains(string.slice(end, 14, 20), "██████")
+  |> should.equal(False)
+}
+
+pub fn the_weighted_columns_hold_their_ratio_test() {
+  // Three columns weighted 3:1:1 across 92 cells.
+  let buf = lab_frame("1", 92, 22)
+  let row = row_text(buf, 14, 92)
+  string.contains(row, "w=3 width=56")
+  |> should.equal(True)
+  string.contains(row, "w=1 width=18")
+  |> should.equal(True)
+}
+
+pub fn the_scroll_screen_reports_the_rows_it_was_given_test() {
+  // The state panel prints the height the list was actually laid out with,
+  // which is read back from the layout rather than guessed from the screen.
+  let buf = lab_frame("4", 92, 22)
+  string.contains(row_text(buf, 8, 92), "rows      14")
+  |> should.equal(True)
+}
+
+pub fn every_lab_screen_fills_its_width_test() {
+  list.each(["1", "2", "3", "4"], fn(key) {
+    list.each([#(80, 24), #(120, 32)], fn(size) {
+      let #(width, height) = size
+      let buf = lab_frame(key, width, height)
+      list.each(indices(height), fn(y) {
+        #(key, y, text.cell_width(row_text(buf, y, width)))
+        |> should.equal(#(key, y, width))
+      })
+    })
+  })
 }
