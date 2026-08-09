@@ -178,8 +178,34 @@ pub fn draw(
   term: Terminal(backend_state),
   build: fn(Frame) -> Frame,
 ) -> Result(Terminal(backend_state), backend.Error) {
+  case draw_with(term, fn(frame) { #(build(frame), Nil) }) {
+    Ok(#(next, Nil)) -> Ok(next)
+    Error(e) -> Error(e)
+  }
+}
+
+@target(erlang)
+/// Draw one frame and carry a value back out of it.
+///
+/// A frame closure works out things the rest of your program wants: the rects
+/// the layout produced, so a click can be matched against them, or the state a
+/// list settled on once it knew how tall it was. Without a way out those die
+/// inside the closure and have to be computed a second time.
+///
+/// ```gleam
+/// let assert Ok(#(term, panes)) =
+///   terminal.draw_with(term, fn(frame) {
+///     let panes = geometry.split_h(frame.area, [Fill, Fill])
+///     #(draw_panes(frame, panes), panes)
+///   })
+/// // `panes` is now available for hit-testing the next mouse event
+/// ```
+pub fn draw_with(
+  term: Terminal(backend_state),
+  build: fn(Frame) -> #(Frame, a),
+) -> Result(#(Terminal(backend_state), a), backend.Error) {
   let screen = area(term)
-  let frame =
+  let #(frame, carried) =
     build(Frame(
       area: screen,
       buffer: buffer.buffer_new(screen),
@@ -188,7 +214,10 @@ pub fn draw(
   let ops = frame_ops(term.previous, frame.buffer, term.repaint, frame.cursor)
   case term.backend.render(term.state, ops) {
     Ok(bs) ->
-      Ok(Terminal(..term, state: bs, previous: frame.buffer, repaint: False))
+      Ok(#(
+        Terminal(..term, state: bs, previous: frame.buffer, repaint: False),
+        carried,
+      ))
     Error(e) -> Error(e)
   }
 }
@@ -263,8 +292,20 @@ pub fn draw(
   term: Terminal(backend_state),
   build: fn(Frame) -> Frame,
 ) -> Result(Terminal(backend_state), backend.Error) {
+  case draw_with(term, fn(frame) { #(build(frame), Nil) }) {
+    Ok(#(next, Nil)) -> Ok(next)
+    Error(e) -> Error(e)
+  }
+}
+
+@target(javascript)
+/// Draw one frame and carry a value back out of it. See the Erlang docs.
+pub fn draw_with(
+  term: Terminal(backend_state),
+  build: fn(Frame) -> #(Frame, a),
+) -> Result(#(Terminal(backend_state), a), backend.Error) {
   let screen = area(term)
-  let frame =
+  let #(frame, carried) =
     build(Frame(
       area: screen,
       buffer: buffer.buffer_new(screen),
@@ -273,7 +314,10 @@ pub fn draw(
   let ops = frame_ops(term.previous, frame.buffer, term.repaint, frame.cursor)
   case term.backend.render(term.state, ops) {
     Ok(bs) ->
-      Ok(Terminal(..term, state: bs, previous: frame.buffer, repaint: False))
+      Ok(#(
+        Terminal(..term, state: bs, previous: frame.buffer, repaint: False),
+        carried,
+      ))
     Error(e) -> Error(e)
   }
 }

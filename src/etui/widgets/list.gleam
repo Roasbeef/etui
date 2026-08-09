@@ -265,6 +265,27 @@ pub fn effective_offset(state: ListState, height: Int) -> Int {
   scroll_offset(state.selected, state.offset, height)
 }
 
+/// The state this list settles on once it knows it has `height` rows.
+///
+/// A list cannot work out its scroll offset until it knows how tall its area
+/// is, and that is decided by the layout, not by the model. Call this with the
+/// height you are about to render into and keep the result:
+///
+/// ```gleam
+/// let inner = block.inner(area, blk)
+/// let listed = list.settle(model.list, inner.size.height)
+/// let buf = list.render_stateful(buf, inner, widget, listed)
+/// // store `listed` back in the model
+/// ```
+///
+/// Rendering without doing this still draws the right rows, because
+/// `render_stateful` works the offset out for itself. What it costs is that
+/// the offset never persists, so the viewport slides one row with every step
+/// instead of holding still until the selection leaves it.
+pub fn settle(state: ListState, height: Int) -> ListState {
+  ListState(..state, offset: effective_offset(state, height))
+}
+
 fn scroll_offset(selected: Int, offset: Int, height: Int) -> Int {
   case selected < offset {
     True -> selected

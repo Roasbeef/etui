@@ -149,6 +149,15 @@ pub fn clamp_state(state: TableState, row_count: Int) -> TableState {
 /// Effective scroll offset for a viewport of `visible_data_h` data rows.
 /// When `show_header` is True, pass `area.size.height - 1`; otherwise pass `area.size.height`.
 /// Pass as `offset` to `scrollbar.scrollbar_new`.
+/// The state this table settles on once it knows how many data rows fit.
+///
+/// Same reasoning as `list.settle`: pass the height of the data area, which is
+/// the area height less one row when a header is shown, and keep the result so
+/// the viewport holds still.
+pub fn settle(state: TableState, visible_data_h: Int) -> TableState {
+  TableState(..state, offset: effective_offset(state, visible_data_h))
+}
+
 pub fn effective_offset(state: TableState, visible_data_h: Int) -> Int {
   scroll_offset(state.selected_row, state.offset, visible_data_h)
 }
