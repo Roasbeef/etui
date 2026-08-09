@@ -390,76 +390,137 @@ fn render_layout(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
 
 // ─────────────────────────────────────────────────────────────────
 // 2 STYLE
+//
+// Every row says what it should look like, and prints the escape sequence it
+// emitted. If the sample disagrees with the description while the sequence is
+// right, that is the terminal's answer, not the library's: several of these
+// attributes are widely ignored.
+
+/// The SGR parameters a modifier emits, e.g. "1" for bold or "6" for rapid
+/// blink. Printed next to each sample so a terminal that ignores an attribute
+/// can be told apart from a library that never asked for it.
+fn sgr(m: style.Modifier) -> String {
+  case style.ansi_modifier(m) {
+    "" -> "-"
+    seq ->
+      "SGR "
+      <> seq
+      |> string.replace("\u{001B}[", "")
+      |> string.replace("m", "")
+  }
+}
+
+fn sample_row(
+  buf: buffer.Buffer,
+  x: Int,
+  y: Int,
+  w: Int,
+  name: String,
+  st: style.Style,
+  sample: String,
+  expect: String,
+) -> buffer.Buffer {
+  line_at(buf, x, y, w, [
+    tinted(text.pad_right(name, 16), muted),
+    styled(text.pad_right(sample, 26), st),
+    tinted(text.pad_right(sgr(st.modifier), 10), style.Indexed(238)),
+    plain(expect),
+  ])
+}
 
 fn render_styles(buf: buffer.Buffer, screen: Rect) -> buffer.Buffer {
   let area = body(screen)
+  let x = area.position.x
+  let w = area.size.width
+  let base = style.default_style()
+  let bold = base |> style.add_modifier(style.bold())
+
   let buf =
     heading(
       buf,
       area,
-      "STYLES THAT SUBTRACT",
-      "row 3 must NOT be bold: it is row 1 with row 2 laid over it.",
+      "TAKING A MODIFIER AWAY",
+      "the three samples come from one bold style. Only the middle one loses it.",
     )
-  let theme = style.default_style() |> style.add_modifier(style.bold())
-  let quiet = style.default_style() |> style.remove_modifier(style.bold())
-  let x = area.position.x
-  let y = area.position.y + 3
-  let w = area.size.width
-
   let buf =
     buf
-    |> line_at(x, y, w, [
-      tinted("1 base      ", muted),
-      styled("bold everywhere", theme),
+    |> line_at(x, area.position.y + 3, w, [
+      tinted(text.pad_right("style", 16), style.Indexed(238)),
+      tinted(text.pad_right("sample", 26), style.Indexed(238)),
+      tinted(text.pad_right("emits", 10), style.Indexed(238)),
+      tinted("should look", style.Indexed(238)),
     ])
-    |> line_at(x, y + 1, w, [
-      tinted("2 overlay   ", muted),
-      plain("remove_modifier(bold)"),
-    ])
-    |> line_at(x, y + 2, w, [
-      tinted("3 patched   ", muted),
-      styled("this must look normal", style.patch(theme, quiet)),
-    ])
-    |> line_at(x, y + 4, w, [
-      tinted("4 control   ", muted),
-      styled("this one stays bold", style.patch(theme, style.default_style())),
-    ])
+    |> sample_row(
+      x,
+      area.position.y + 4,
+      w,
+      "bold",
+      bold,
+      "the base style",
+      "BOLD",
+    )
+    |> sample_row(
+      x,
+      area.position.y + 5,
+      w,
+      "+ remove(bold)",
+      style.patch(bold, base |> style.remove_modifier(style.bold())),
+      "bold taken away",
+      "PLAIN  <- the new thing",
+    )
+    |> sample_row(
+      x,
+      area.position.y + 6,
+      w,
+      "+ empty",
+      style.patch(bold, base),
+      "empty overlay",
+      "BOLD   <- control, empty means no change",
+    )
 
   let buf =
     heading(
       buf,
-      rect_new(x, y + 6, w, 2),
-      "NEW MODIFIER BITS",
-      "hidden reserves cells without drawing them: brackets stay put.",
+      rect_new(x, area.position.y + 8, w, 2),
+      "EVERY MODIFIER",
+      "a sample that disagrees while its sequence is right is the terminal, not etui.",
     )
-  buf
-  |> line_at(x, y + 9, w, [
-    tinted("hidden      ", muted),
+  let bits = [
+    #("bold", style.bold(), "thicker or brighter"),
+    #("dim", style.dim(), "fainter"),
+    #("italic", style.italic(), "slanted, often ignored"),
+    #("underline", style.underline(), "underlined"),
+    #("strikethrough", style.strikethrough(), "struck through"),
+    #("reverse", style.reverse(), "colours swapped"),
+    #("hidden", style.hidden(), "invisible, cells still reserved"),
+    #("blink", style.blink(), "blinking, if the terminal blinks at all"),
+    #(
+      "rapid_blink",
+      style.rapid_blink(),
+      "faster blink; almost every terminal ignores it",
+    ),
+  ]
+  let buf =
+    list.index_fold(bits, buf, fn(acc, bit, i) {
+      let #(name, m, expect) = bit
+      sample_row(
+        acc,
+        x,
+        area.position.y + 11 + i,
+        w,
+        name,
+        base |> style.add_modifier(m),
+        "sample text",
+        expect,
+      )
+    })
+
+  line_at(buf, x, area.position.y + 21, w, [
+    tinted("hidden check  ", muted),
     plain("["),
-    styled(
-      "SECRET",
-      style.default_style() |> style.add_modifier(style.hidden()),
-    ),
-    plain("]  <- six blank cells between the brackets"),
-  ])
-  |> line_at(x, y + 10, w, [
-    tinted("rapid_blink ", muted),
-    styled(
-      "blinking",
-      style.default_style() |> style.add_modifier(style.rapid_blink()),
-    ),
-    tinted("  (many terminals fall back to the slow blink)", muted),
-  ])
-  |> line_at(x, y + 11, w, [
-    tinted("combined    ", muted),
-    styled(
-      "bold + italic + underline + strikethrough",
-      style.default_style()
-        |> style.add_modifier(style.bold())
-        |> style.add_modifier(style.italic())
-        |> style.add_modifier(style.underline())
-        |> style.add_modifier(style.strikethrough()),
-    ),
+    styled("SECRET", base |> style.add_modifier(style.hidden())),
+    plain("]"),
+    tinted("  the brackets must stay six cells apart", muted),
   ])
 }
 
