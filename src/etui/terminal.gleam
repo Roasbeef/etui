@@ -35,9 +35,86 @@ import etui/buffer
 import etui/cursor
 import etui/geometry.{type Position, type Rect}
 import etui/widget
+import gleam/int
+import gleam/list
+import gleam/string
 
 @target(javascript)
 import gleam/javascript/promise
+
+// ─────────────────────────────────────────────────────────────────
+// Viewport
+
+/// How much of the terminal an app takes over.
+///
+/// | Viewport | What it uses | What happens to the scrollback |
+/// |----------|--------------|--------------------------------|
+/// | `Fullscreen` | the whole terminal, on the alternate screen | untouched, and the shell reappears on exit |
+/// | `Inline(n)` | the bottom `n` rows of the normal screen | kept, and the app's last frame stays above the prompt |
+/// | `Fixed(rect)` | one rect of the normal screen | everything outside the rect is left alone |
+///
+/// `Inline` is how a build tool or an installer draws a progress area without
+/// taking the screen away from you: the rows above it keep scrolling, and what
+/// it drew is still on screen after it exits.
+pub type Viewport {
+  Fullscreen
+  Inline(height: Int)
+  Fixed(area: Rect)
+}
+
+/// The rect a viewport occupies in a terminal of this size.
+fn viewport_area(vp: Viewport, size: backend.TerminalSize) -> Rect {
+  case vp {
+    Fullscreen -> geometry.rect_new(0, 0, size.width, size.height)
+    Inline(rows) -> {
+      let h = int.clamp(rows, 0, size.height)
+      geometry.rect_new(0, size.height - h, size.width, h)
+    }
+    Fixed(area) ->
+      geometry.clamp(area, geometry.rect_new(0, 0, size.width, size.height))
+  }
+}
+
+/// Only a full-screen app may clear the terminal. Anywhere else that would
+/// wipe scrollback the app does not own, so a repaint writes its own cells
+/// and touches nothing outside them.
+fn may_clear(vp: Viewport) -> Bool {
+  case vp {
+    Fullscreen -> True
+    _ -> False
+  }
+}
+
+/// Ops that make room for the viewport before the first frame.
+///
+/// An inline viewport prints its own height in newlines, which scrolls
+/// whatever was on screen up and leaves the bottom rows blank for the app.
+/// Without it the first frame would draw over the last lines of output.
+fn open_viewport(vp: Viewport) -> List(RenderOp) {
+  case vp {
+    Fullscreen -> [backend.EnterAltScreen]
+    // The backends enter the alternate screen when they initialise, which is
+    // exactly what these two must not have.
+    Inline(rows) -> [
+      backend.ExitAltScreen,
+      backend.Write(string.repeat("\n", int.max(0, rows))),
+    ]
+    Fixed(_) -> [backend.ExitAltScreen]
+  }
+}
+
+/// Ops that hand the terminal back, once the app is done.
+fn close_viewport(vp: Viewport, area: Rect) -> List(RenderOp) {
+  case vp {
+    Fullscreen -> [backend.Write(cursor.show())]
+    // Leave the cursor under the last frame so the shell prompt continues
+    // after it rather than over it.
+    _ -> [
+      backend.MoveCursor(0, geometry.bottom(area) - 1),
+      backend.Write("\r\n" <> cursor.show()),
+    ]
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Frame
@@ -95,6 +172,7 @@ pub fn frame_ops(
   curr: buffer.Buffer,
   first_frame: Bool,
   cur: Cursor,
+  clear_first: Bool,
 ) -> List(RenderOp) {
   let ansi = case first_frame {
     True -> buffer.to_ansi(curr)
@@ -110,7 +188,7 @@ pub fn frame_ops(
     "", "" -> []
     "", only_cursor -> [backend.Write(only_cursor)]
     _, _ ->
-      case first_frame {
+      case first_frame && clear_first {
         True -> [
           backend.ClearScreen,
           backend.MoveCursor(0, 0),
@@ -121,8 +199,8 @@ pub fn frame_ops(
   }
 }
 
-fn blank_screen(width: Int, height: Int) -> buffer.Buffer {
-  buffer.buffer_new(geometry.rect_new(0, 0, width, height))
+fn blank(area: Rect) -> buffer.Buffer {
+  buffer.buffer_new(area)
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -134,6 +212,8 @@ pub opaque type Terminal(backend_state) {
   Terminal(
     backend: backend.Backend(backend_state),
     state: backend_state,
+    /// How much of the screen this app took over.
+    viewport: Viewport,
     /// What the terminal is currently showing, to diff the next frame against.
     previous: buffer.Buffer,
     /// Set at start-up and after a resize: the next frame repaints in full.
@@ -142,22 +222,44 @@ pub opaque type Terminal(backend_state) {
 }
 
 @target(erlang)
-/// Open a terminal: enter raw mode and the alternate screen, hide the cursor,
-/// and measure the screen.
+/// Open a terminal that takes over the whole screen.
 pub fn new(
   b: backend.Backend(backend_state),
 ) -> Result(Terminal(backend_state), backend.Error) {
+  new_with_viewport(b, Fullscreen)
+}
+
+@target(erlang)
+/// Open a terminal that uses only part of the screen.
+///
+/// ```gleam
+/// // A five-row progress area under whatever the shell has already printed
+/// let assert Ok(term) = terminal.new_with_viewport(default.new(), terminal.Inline(5))
+/// ```
+pub fn new_with_viewport(
+  b: backend.Backend(backend_state),
+  vp: Viewport,
+) -> Result(Terminal(backend_state), backend.Error) {
   case b.init() {
     Ok(bs) -> {
-      let _ = b.render(bs, [backend.Write(cursor.hide())])
       let #(size, bs2) = case b.next_size(bs) {
         Ok(#(sz, bs1)) -> #(sz, bs1)
         _ -> #(backend.TerminalSize(width: 80, height: 24), bs)
       }
+      let area = viewport_area(vp, size)
+      // One write, not two: opening the viewport and hiding the cursor are the
+      // same moment as far as the terminal is concerned.
+      let opening =
+        list.append(open_viewport(vp), [backend.Write(cursor.hide())])
+      let opened = case b.render(bs2, opening) {
+        Ok(bs3) -> bs3
+        _ -> bs2
+      }
       Ok(Terminal(
         backend: b,
-        state: bs2,
-        previous: blank_screen(size.width, size.height),
+        state: opened,
+        viewport: vp,
+        previous: blank(area),
         repaint: True,
       ))
     }
@@ -166,9 +268,16 @@ pub fn new(
 }
 
 @target(erlang)
-/// The screen area, which is what a frame will be given.
+/// The area a frame will be given, which is the viewport rather than always
+/// the whole screen.
 pub fn area(term: Terminal(backend_state)) -> Rect {
   buffer.area(term.previous)
+}
+
+@target(erlang)
+/// The viewport this terminal was opened with.
+pub fn viewport(term: Terminal(backend_state)) -> Viewport {
+  term.viewport
 }
 
 @target(erlang)
@@ -211,7 +320,14 @@ pub fn draw_with(
       buffer: buffer.buffer_new(screen),
       cursor: CursorUntouched,
     ))
-  let ops = frame_ops(term.previous, frame.buffer, term.repaint, frame.cursor)
+  let ops =
+    frame_ops(
+      term.previous,
+      frame.buffer,
+      term.repaint,
+      frame.cursor,
+      may_clear(term.viewport),
+    )
   case term.backend.render(term.state, ops) {
     Ok(bs) ->
       Ok(#(
@@ -240,7 +356,8 @@ pub fn poll(
 @target(erlang)
 /// Leave the alternate screen, restore the cursor and hand the terminal back.
 pub fn restore(term: Terminal(backend_state)) -> Nil {
-  let _ = term.backend.render(term.state, [backend.Write(cursor.show())])
+  let _ =
+    term.backend.render(term.state, close_viewport(term.viewport, area(term)))
   term.backend.cleanup(term.state)
 }
 
@@ -255,26 +372,51 @@ pub opaque type Terminal(backend_state) {
   Terminal(
     backend: backend.AsyncBackend(backend_state),
     state: backend_state,
+    viewport: Viewport,
     previous: buffer.Buffer,
     repaint: Bool,
   )
 }
 
 @target(javascript)
+/// Open a terminal that takes over the whole screen.
 pub fn new(
   b: backend.AsyncBackend(backend_state),
 ) -> Result(Terminal(backend_state), backend.Error) {
+  new_with_viewport(b, Fullscreen)
+}
+
+@target(javascript)
+/// Open a terminal that uses only part of the screen.
+///
+/// ```gleam
+/// // A five-row progress area under whatever the shell has already printed
+/// let assert Ok(term) = terminal.new_with_viewport(default.new(), terminal.Inline(5))
+/// ```
+pub fn new_with_viewport(
+  b: backend.AsyncBackend(backend_state),
+  vp: Viewport,
+) -> Result(Terminal(backend_state), backend.Error) {
   case b.init() {
     Ok(bs) -> {
-      let _ = b.render(bs, [backend.Write(cursor.hide())])
       let #(size, bs2) = case b.next_size(bs) {
         Ok(#(sz, bs1)) -> #(sz, bs1)
         _ -> #(backend.TerminalSize(width: 80, height: 24), bs)
       }
+      let area = viewport_area(vp, size)
+      // One write, not two: opening the viewport and hiding the cursor are the
+      // same moment as far as the terminal is concerned.
+      let opening =
+        list.append(open_viewport(vp), [backend.Write(cursor.hide())])
+      let opened = case b.render(bs2, opening) {
+        Ok(bs3) -> bs3
+        _ -> bs2
+      }
       Ok(Terminal(
         backend: b,
-        state: bs2,
-        previous: blank_screen(size.width, size.height),
+        state: opened,
+        viewport: vp,
+        previous: blank(area),
         repaint: True,
       ))
     }
@@ -285,6 +427,11 @@ pub fn new(
 @target(javascript)
 pub fn area(term: Terminal(backend_state)) -> Rect {
   buffer.area(term.previous)
+}
+
+@target(javascript)
+pub fn viewport(term: Terminal(backend_state)) -> Viewport {
+  term.viewport
 }
 
 @target(javascript)
@@ -311,7 +458,14 @@ pub fn draw_with(
       buffer: buffer.buffer_new(screen),
       cursor: CursorUntouched,
     ))
-  let ops = frame_ops(term.previous, frame.buffer, term.repaint, frame.cursor)
+  let ops =
+    frame_ops(
+      term.previous,
+      frame.buffer,
+      term.repaint,
+      frame.cursor,
+      may_clear(term.viewport),
+    )
   case term.backend.render(term.state, ops) {
     Ok(bs) ->
       Ok(#(
@@ -340,7 +494,8 @@ pub fn poll(
 
 @target(javascript)
 pub fn restore(term: Terminal(backend_state)) -> Nil {
-  let _ = term.backend.render(term.state, [backend.Write(cursor.show())])
+  let _ =
+    term.backend.render(term.state, close_viewport(term.viewport, area(term)))
   term.backend.cleanup(term.state)
 }
 
@@ -351,7 +506,14 @@ fn absorb(
 ) -> Terminal(backend_state) {
   case event {
     backend.Resize(w, h) ->
-      Terminal(..term, previous: blank_screen(w, h), repaint: True)
+      Terminal(
+        ..term,
+        previous: blank(viewport_area(
+          term.viewport,
+          backend.TerminalSize(width: w, height: h),
+        )),
+        repaint: True,
+      )
     _ -> term
   }
 }
