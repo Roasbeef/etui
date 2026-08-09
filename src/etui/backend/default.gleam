@@ -29,6 +29,14 @@ pub fn new_with_mouse() -> backend.Backend(erlang.ErlangTerminalState) {
   erlang.new_with_mouse()
 }
 
+@target(erlang)
+/// Backend with an explicit feature set. Same call on both targets.
+pub fn new_with_options(
+  opts: backend.Options,
+) -> backend.Backend(erlang.ErlangTerminalState) {
+  erlang.new_with_options(opts)
+}
+
 @target(javascript)
 pub fn new() -> backend.AsyncBackend(node.NodeState) {
   node.new()
@@ -36,5 +44,15 @@ pub fn new() -> backend.AsyncBackend(node.NodeState) {
 
 @target(javascript)
 pub fn new_with_mouse() -> backend.AsyncBackend(node.NodeState) {
-  node.new()
+  node.new_with_options(
+    backend.Options(..backend.default_options(), mouse: True),
+  )
+}
+
+@target(javascript)
+/// Backend with an explicit feature set. Same call on both targets.
+pub fn new_with_options(
+  opts: backend.Options,
+) -> backend.AsyncBackend(node.NodeState) {
+  node.new_with_options(opts)
 }

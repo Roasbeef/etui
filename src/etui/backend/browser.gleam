@@ -1,4 +1,3 @@
-@target(javascript)
 /// Browser (xterm.js) terminal backend for the JavaScript target.
 ///
 /// Provides the same `AsyncBackend` interface as `node.gleam` but uses an
@@ -26,8 +25,10 @@
 import etui/backend.{
   type Error, type InputEvent, type RenderOp, type TerminalSize, ClearScreen,
   DisableBracketedPaste, DisableMouse, EnableBracketedPaste, EnableMouse,
-  EnterAltScreen, ExitAltScreen, IOError, MoveCursor, Resize, Write,
+  EnterAltScreen, ExitAltScreen, IOError, MoveCursor, Resize, Tick, Write,
 }
+@target(javascript)
+import etui/input
 
 @target(javascript)
 import gleam/int
@@ -42,7 +43,14 @@ import gleam/list
 // Types
 
 pub type BrowserState {
-  BrowserState(cols: Int, rows: Int)
+  BrowserState(
+    cols: Int,
+    rows: Int,
+    /// Bytes read but not yet forming a complete escape sequence.
+    pending: String,
+    /// Events decoded but not yet handed to the app.
+    queue: List(InputEvent),
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -88,10 +96,16 @@ fn window_size_ffi() -> Result(#(Int, Int), String) {
 }
 
 @target(javascript)
-@external(javascript, "./browser_ffi.mjs", "pollInput")
-fn poll_input_ffi(timeout_ms: Int) -> promise.Promise(Result(InputEvent, Nil)) {
+@external(javascript, "./browser_ffi.mjs", "readChunk")
+fn read_chunk_ffi(timeout_ms: Int) -> promise.Promise(String) {
   let _ = timeout_ms
   panic as "etui/backend/browser requires the JavaScript target"
+}
+
+@target(javascript)
+@external(javascript, "./browser_ffi.mjs", "takeResize")
+fn take_resize_ffi() -> List(Int) {
+  panic as "requires the JavaScript target"
 }
 
 @target(javascript)
@@ -134,7 +148,7 @@ fn init_terminal() -> Result(BrowserState, Error) {
     Ok(#(c, r)) -> #(c, r)
     Error(_) -> #(80, 24)
   }
-  let state = BrowserState(cols: cols, rows: rows)
+  let state = BrowserState(cols: cols, rows: rows, pending: "", queue: [])
   register_cleanup_ffi(fn() {
     let _ = cleanup_terminal(state)
     Nil
@@ -153,22 +167,45 @@ fn render_ops(
 }
 
 @target(javascript)
+/// Return the next input event.
+///
+/// One read can carry several key presses, or stop in the middle of an escape
+/// sequence. The chunk is decoded by `etui/input`, the same parser the Erlang
+/// backend uses, into a queue that is handed out one event per call. The
+/// parsing used to live in JavaScript in the FFI, which is why this target
+/// spent a release without modified keys, bracketed paste or mouse drags.
 fn poll_input(
   state: BrowserState,
   timeout_ms: Int,
 ) -> promise.Promise(Result(#(InputEvent, BrowserState), Error)) {
-  promise.map(poll_input_ffi(timeout_ms), fn(result) {
-    case result {
-      Ok(ev) -> {
-        let new_state = case ev {
-          Resize(c, r) -> BrowserState(cols: c, rows: r)
-          _ -> state
+  case state.queue {
+    [event, ..rest] ->
+      promise.resolve(Ok(#(event, BrowserState(..state, queue: rest))))
+    [] ->
+      promise.map(read_chunk_ffi(timeout_ms), fn(chunk) {
+        let #(events, pending) = case chunk {
+          // Nothing arrived before the timeout, so a half-finished sequence is
+          // a real Escape press rather than the start of something.
+          "" -> #(input.flush(state.pending), "")
+          _ -> {
+            let input.Parsed(decoded, rest) =
+              input.parse(state.pending <> chunk)
+            #(decoded, rest)
+          }
         }
-        Ok(#(ev, new_state))
-      }
-      Error(_) -> Error(IOError("poll failed"))
-    }
-  })
+        let #(sized, resize) = case take_resize_ffi() {
+          [cols, rows] -> #(BrowserState(..state, cols: cols, rows: rows), [
+            Resize(cols, rows),
+          ])
+          _ -> #(state, [])
+        }
+        let next = BrowserState(..sized, pending: pending, queue: [])
+        case list.append(resize, events) {
+          [] -> Ok(#(Tick, next))
+          [event, ..rest] -> Ok(#(event, BrowserState(..next, queue: rest)))
+        }
+      })
+  }
 }
 
 @target(javascript)
@@ -181,7 +218,7 @@ fn get_terminal_size(
   }
   Ok(#(
     backend.TerminalSize(width: cols, height: rows),
-    BrowserState(cols: cols, rows: rows),
+    BrowserState(cols: cols, rows: rows, pending: "", queue: []),
   ))
 }
 

@@ -32,14 +32,11 @@ import gleam/io
 import gleam/list
 import gleam/string
 
-// The model and the renderer are plain functions and build everywhere, which
-// is what lets the screen tests drive them. Only the loop needs a real
-// terminal, so only the loop is Erlang-only.
-@target(erlang)
-import etui/backend/erlang
-
-@target(erlang)
+import etui/backend/default
 import etui/terminal
+
+@target(javascript)
+import gleam/javascript/promise
 
 // ─────────────────────────────────────────────────────────────────
 // Palette
@@ -733,42 +730,103 @@ pub fn render(m: Model, screen: Rect) -> #(buffer.Buffer, Model, List(Rect)) {
 // This is the part `app.run_*` would have owned. It is twenty lines, and
 // everything in it is ordinary code.
 
+fn options() -> backend.Options {
+  backend.Options(mouse: True, paste: True)
+}
+
+// The loop is written twice because polling is synchronous on Erlang and a
+// promise on JavaScript. Everything above this line is shared, which is most
+// of the app: only the six lines that wait for an event differ.
+
 @target(erlang)
 pub fn main() -> Nil {
-  let opts = erlang.Options(mouse: True, paste: True)
-  case terminal.new(erlang.new_with_options(opts)) {
+  case terminal.new(default.new_with_options(options())) {
     Error(_) -> io.println("could not open the terminal")
     Ok(term) -> {
-      let final = run(term, initial())
-      terminal.restore(final)
+      terminal.restore(run(term, initial()))
       io.println("lab closed")
     }
   }
 }
 
 @target(erlang)
+fn run(term: terminal.Terminal(bs), m: Model) -> terminal.Terminal(bs) {
+  case draw_frame(term, m) {
+    Error(_) -> term
+    Ok(#(drawn, settled, panes)) ->
+      case terminal.poll(drawn, 30) {
+        Error(_) -> drawn
+        Ok(#(event, polled)) ->
+          case step(settled, event, panes) {
+            Ok(next) -> run(polled, next)
+            Error(Nil) -> polled
+          }
+      }
+  }
+}
+
+@target(javascript)
+pub fn main() -> promise.Promise(Nil) {
+  case terminal.new(default.new_with_options(options())) {
+    Error(_) -> {
+      io.println("could not open the terminal")
+      promise.resolve(Nil)
+    }
+    Ok(term) ->
+      promise.map(run(term, initial()), fn(final) {
+        terminal.restore(final)
+        io.println("lab closed")
+      })
+  }
+}
+
+@target(javascript)
 fn run(
-  term: terminal.Terminal(erlang.ErlangTerminalState),
+  term: terminal.Terminal(bs),
   m: Model,
-) -> terminal.Terminal(erlang.ErlangTerminalState) {
+) -> promise.Promise(terminal.Terminal(bs)) {
+  case draw_frame(term, m) {
+    Error(_) -> promise.resolve(term)
+    Ok(#(drawn, settled, panes)) ->
+      promise.await(terminal.poll(drawn, 30), fn(result) {
+        case result {
+          Error(_) -> promise.resolve(drawn)
+          Ok(#(event, polled)) ->
+            case step(settled, event, panes) {
+              Ok(next) -> run(polled, next)
+              Error(Nil) -> promise.resolve(polled)
+            }
+        }
+      })
+  }
+}
+
+/// Draw a frame and carry out the settled model and the panes it laid out.
+fn draw_frame(
+  term: terminal.Terminal(bs),
+  m: Model,
+) -> Result(#(terminal.Terminal(bs), Model, List(Rect)), backend.Error) {
   case
     terminal.draw_with(term, fn(frame) {
       let #(buf, settled, panes) = render(m, frame.area)
       #(terminal.with_buffer(frame, buf), #(settled, panes))
     })
   {
-    Error(_) -> term
-    Ok(#(drawn, #(settled, panes))) ->
-      case terminal.poll(drawn, 30) {
-        Error(_) -> drawn
-        Ok(#(event, polled)) -> {
-          let next = hit_test(update(event, settled), event, panes)
-          case next.quit {
-            True -> polled
-            False -> run(polled, next)
-          }
-        }
-      }
+    Ok(#(drawn, #(settled, panes))) -> Ok(#(drawn, settled, panes))
+    Error(e) -> Error(e)
+  }
+}
+
+/// One event applied. `Error(Nil)` means the app asked to stop.
+fn step(
+  m: Model,
+  event: backend.InputEvent,
+  panes: List(Rect),
+) -> Result(Model, Nil) {
+  let next = hit_test(update(event, m), event, panes)
+  case next.quit {
+    True -> Error(Nil)
+    False -> Ok(next)
   }
 }
 

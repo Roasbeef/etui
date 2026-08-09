@@ -1,4 +1,3 @@
-@target(javascript)
 /// Node.js terminal backend for the JavaScript target.
 ///
 /// Provides the same `Backend` interface as `erlang.gleam` but uses
@@ -27,8 +26,10 @@
 import etui/backend.{
   type Error, type InputEvent, type RenderOp, type TerminalSize, ClearScreen,
   DisableBracketedPaste, DisableMouse, EnableBracketedPaste, EnableMouse,
-  EnterAltScreen, ExitAltScreen, IOError, MoveCursor, Resize, Write,
+  EnterAltScreen, ExitAltScreen, IOError, MoveCursor, Resize, Tick, Write,
 }
+@target(javascript)
+import etui/input
 
 @target(javascript)
 import gleam/int
@@ -43,7 +44,14 @@ import gleam/list
 // Types
 
 pub type NodeState {
-  NodeState(cols: Int, rows: Int)
+  NodeState(
+    cols: Int,
+    rows: Int,
+    /// Bytes read but not yet forming a complete escape sequence.
+    pending: String,
+    /// Events decoded but not yet handed to the app.
+    queue: List(InputEvent),
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -51,13 +59,29 @@ pub type NodeState {
 
 @target(javascript)
 pub fn new() -> backend.AsyncBackend(NodeState) {
+  new_with_options(backend.default_options())
+}
+
+@target(javascript)
+/// Backend with an explicit feature set, matching the Erlang one.
+pub fn new_with_options(
+  opts: backend.Options,
+) -> backend.AsyncBackend(NodeState) {
   backend.AsyncBackend(
-    init: init_terminal,
+    init: fn() { init_terminal(opts) },
     render: render_ops,
     poll: poll_input,
     next_size: get_terminal_size,
     cleanup: cleanup_terminal,
   )
+}
+
+@target(javascript)
+fn append_if(ops: List(RenderOp), cond: Bool, op: RenderOp) -> List(RenderOp) {
+  case cond {
+    True -> list.append(ops, [op])
+    False -> ops
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -89,10 +113,16 @@ fn window_size_ffi() -> Result(#(Int, Int), String) {
 }
 
 @target(javascript)
-@external(javascript, "./node_ffi.mjs", "pollInput")
-fn poll_input_ffi(timeout_ms: Int) -> promise.Promise(Result(InputEvent, Nil)) {
+@external(javascript, "./node_ffi.mjs", "readChunk")
+fn read_chunk_ffi(timeout_ms: Int) -> promise.Promise(String) {
   let _ = timeout_ms
   panic as "etui/backend/node requires the JavaScript target"
+}
+
+@target(javascript)
+@external(javascript, "./node_ffi.mjs", "takeResize")
+fn take_resize_ffi() -> List(Int) {
+  panic as "requires the JavaScript target"
 }
 
 @target(javascript)
@@ -126,16 +156,19 @@ fn render_op_to_ansi(op: RenderOp) -> String {
 // Implementation
 
 @target(javascript)
-fn init_terminal() -> Result(NodeState, Error) {
+fn init_terminal(opts: backend.Options) -> Result(NodeState, Error) {
   enter_raw_ffi()
-  let ops = [EnterAltScreen, ClearScreen, EnableMouse]
+  let ops =
+    [EnterAltScreen, ClearScreen]
+    |> append_if(opts.mouse, EnableMouse)
+    |> append_if(opts.paste, EnableBracketedPaste)
   let ansi = list.map(ops, render_op_to_ansi) |> string_join("")
   write_stdout_ffi(ansi)
   let #(cols, rows) = case window_size_ffi() {
     Ok(#(c, r)) -> #(c, r)
     Error(_) -> #(80, 24)
   }
-  let state = NodeState(cols: cols, rows: rows)
+  let state = NodeState(cols: cols, rows: rows, pending: "", queue: [])
   register_cleanup_ffi(fn() {
     let _ = cleanup_terminal(state)
     Nil
@@ -154,22 +187,45 @@ fn render_ops(
 }
 
 @target(javascript)
+/// Return the next input event.
+///
+/// One read can carry several key presses, or stop in the middle of an escape
+/// sequence. The chunk is decoded by `etui/input`, the same parser the Erlang
+/// backend uses, into a queue that is handed out one event per call. The
+/// parsing used to live in JavaScript in the FFI, which is why this target
+/// spent a release without modified keys, bracketed paste or mouse drags.
 fn poll_input(
   state: NodeState,
   timeout_ms: Int,
 ) -> promise.Promise(Result(#(InputEvent, NodeState), Error)) {
-  promise.map(poll_input_ffi(timeout_ms), fn(result) {
-    case result {
-      Ok(ev) -> {
-        let new_state = case ev {
-          Resize(c, r) -> NodeState(cols: c, rows: r)
-          _ -> state
+  case state.queue {
+    [event, ..rest] ->
+      promise.resolve(Ok(#(event, NodeState(..state, queue: rest))))
+    [] ->
+      promise.map(read_chunk_ffi(timeout_ms), fn(chunk) {
+        let #(events, pending) = case chunk {
+          // Nothing arrived before the timeout, so a half-finished sequence is
+          // a real Escape press rather than the start of something.
+          "" -> #(input.flush(state.pending), "")
+          _ -> {
+            let input.Parsed(decoded, rest) =
+              input.parse(state.pending <> chunk)
+            #(decoded, rest)
+          }
         }
-        Ok(#(ev, new_state))
-      }
-      Error(_) -> Error(IOError("poll failed"))
-    }
-  })
+        let #(sized, resize) = case take_resize_ffi() {
+          [cols, rows] -> #(NodeState(..state, cols: cols, rows: rows), [
+            Resize(cols, rows),
+          ])
+          _ -> #(state, [])
+        }
+        let next = NodeState(..sized, pending: pending, queue: [])
+        case list.append(resize, events) {
+          [] -> Ok(#(Tick, next))
+          [event, ..rest] -> Ok(#(event, NodeState(..next, queue: rest)))
+        }
+      })
+  }
 }
 
 @target(javascript)
@@ -182,7 +238,7 @@ fn get_terminal_size(
   }
   Ok(#(
     backend.TerminalSize(width: cols, height: rows),
-    NodeState(cols: cols, rows: rows),
+    NodeState(cols: cols, rows: rows, pending: "", queue: []),
   ))
 }
 

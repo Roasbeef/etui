@@ -2,12 +2,7 @@
 // Call setup(term) with an xterm.js Terminal instance BEFORE calling main().
 // Key normalisation is identical to node_ffi.mjs so keys.match works the same.
 
-import { Ok, Error } from "../../gleam.mjs";
-import {
-  KeyPress, Resize, Tick,
-  MousePress, MouseRelease, MouseScroll,
-  MouseLeft, MouseMiddle, MouseRight,
-} from "../backend.mjs";
+import { toList } from "../../gleam.mjs";
 
 // ─── State ───────────────────────────────────────────────────────
 
@@ -15,8 +10,6 @@ let term = null;
 let inputBuffer = [];
 let inputResolvers = [];
 let resizeQueue = [];
-let escapeBuffer = null;
-let escapeTimer = null;
 
 // ─── Terminal injection ──────────────────────────────────────────
 // Called by the host page before main().
@@ -52,63 +45,42 @@ export function windowSize() {
   return new Ok([cols, rows]);
 }
 
-// ─── Input handling ──────────────────────────────────────────────
-// xterm.js fires onData with the same raw byte sequences as a real terminal.
+// ─── Input handling ───────────────────────────────────────────────
+//
+// Chunks are queued exactly as they arrive; etui/input turns them into events.
+// See node_ffi.mjs for why the parsing does not live here.
 
 function onData(chunk) {
-  if (escapeBuffer !== null) {
-    clearTimeout(escapeTimer);
-    escapeTimer = null;
-    const combined = escapeBuffer + chunk;
-    escapeBuffer = null;
-    inputBuffer.push(combined);
-  } else if (chunk === "\x1b") {
-    escapeBuffer = chunk;
-    escapeTimer = setTimeout(() => {
-      escapeBuffer = null;
-      escapeTimer = null;
-      inputBuffer.push("\x1b");
-      drainResolvers();
-    }, 20);
-    return;
-  } else {
-    inputBuffer.push(chunk);
-  }
+  inputBuffer.push(chunk);
   drainResolvers();
 }
 
 function drainResolvers() {
   while (inputResolvers.length > 0 && (inputBuffer.length > 0 || resizeQueue.length > 0)) {
-    inputResolvers.shift()(null);
+    const resolve = inputResolvers.shift();
+    resolve(null);
   }
 }
 
-// ─── Poll ─────────────────────────────────────────────────────────
-
-export async function pollInput(timeoutMs) {
-  if (resizeQueue.length > 0) {
-    const [cols, rows] = resizeQueue.shift();
-    return new Ok(new Resize(cols, rows));
-  }
-  if (inputBuffer.length > 0) {
-    return new Ok(parseChunk(inputBuffer.shift()));
-  }
+/// The bytes waiting to be read, or "" if none arrived before the timeout.
+export async function readChunk(timeoutMs) {
+  if (inputBuffer.length > 0) return inputBuffer.shift();
+  if (resizeQueue.length > 0) return "";
   const result = await Promise.race([
     new Promise((resolve) => inputResolvers.push(resolve)),
     new Promise((resolve) => setTimeout(() => resolve("timeout"), timeoutMs)),
   ]);
-  if (result === "timeout") return new Ok(new Tick());
-  if (resizeQueue.length > 0) {
-    const [cols, rows] = resizeQueue.shift();
-    return new Ok(new Resize(cols, rows));
-  }
-  if (inputBuffer.length > 0) {
-    return new Ok(parseChunk(inputBuffer.shift()));
-  }
-  return new Ok(new Tick());
+  if (result === "timeout") return "";
+  if (inputBuffer.length > 0) return inputBuffer.shift();
+  return "";
 }
 
-// ─── Cleanup ──────────────────────────────────────────────────────
+/// A pending resize as [cols, rows], or [].
+export function takeResize() {
+  if (resizeQueue.length === 0) return toList([]);
+  const [cols, rows] = resizeQueue.shift();
+  return toList([cols, rows]);
+}
 
 export function registerCleanup(cleanupFn) {
   window.addEventListener("beforeunload", () => {

@@ -32,25 +32,6 @@ pub type ErlangTerminalState {
   )
 }
 
-/// What to turn on when the terminal is initialised.
-pub type Options {
-  Options(
-    /// Report mouse buttons, drags and the wheel as input events.
-    mouse: Bool,
-    /// Deliver pasted text as one `backend.Paste` event.
-    ///
-    /// Off by default: with it on, an app that does not handle `Paste` sees
-    /// nothing at all when the user pastes, which is worse than the mangled
-    /// key presses it sees today.
-    paste: Bool,
-  )
-}
-
-/// Mouse off, bracketed paste off.
-pub fn default_options() -> Options {
-  Options(mouse: False, paste: False)
-}
-
 /// Gap between terminal-size queries when the window is sitting still.
 ///
 /// `io:columns/0` is a synchronous round-trip to the group leader, which is
@@ -73,11 +54,11 @@ const resize_settle_ms = 400
 // Backend construction
 
 pub fn new() -> backend.Backend(ErlangTerminalState) {
-  new_with_options(default_options())
+  new_with_options(backend.default_options())
 }
 
 pub fn new_with_mouse() -> backend.Backend(ErlangTerminalState) {
-  new_with_options(Options(..default_options(), mouse: True))
+  new_with_options(backend.Options(..backend.default_options(), mouse: True))
 }
 
 /// Backend with an explicit feature set.
@@ -85,7 +66,9 @@ pub fn new_with_mouse() -> backend.Backend(ErlangTerminalState) {
 /// ```gleam
 /// erlang.new_with_options(erlang.Options(mouse: True, paste: True))
 /// ```
-pub fn new_with_options(opts: Options) -> backend.Backend(ErlangTerminalState) {
+pub fn new_with_options(
+  opts: backend.Options,
+) -> backend.Backend(ErlangTerminalState) {
   backend.Backend(
     init: fn() { init_terminal(opts) },
     render: render_ops,
@@ -165,7 +148,7 @@ fn write_cleanup_ffi() -> Nil {
 // Turning it off reclaims that column; `write_cleanup` turns it back on.
 const disable_autowrap = "\u{001B}[?7l"
 
-fn init_terminal(opts: Options) -> Result(ErlangTerminalState, Error) {
+fn init_terminal(opts: backend.Options) -> Result(ErlangTerminalState, Error) {
   init_tty_state()
   let init_ops =
     [EnterAltScreen, Write(disable_autowrap), ClearScreen]

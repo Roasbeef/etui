@@ -71,6 +71,25 @@ pub type AsyncBackend(state) {
   )
 }
 
+/// What a backend should turn on when it initialises the terminal.
+pub type Options {
+  Options(
+    /// Report mouse buttons, drags and the wheel as input events.
+    mouse: Bool,
+    /// Deliver pasted text as one `Paste` event.
+    ///
+    /// Off by default: with it on, an app that does not handle `Paste` sees
+    /// nothing at all when the user pastes, which is worse than the mangled
+    /// key presses it sees today.
+    paste: Bool,
+  )
+}
+
+/// Mouse off, bracketed paste off.
+pub fn default_options() -> Options {
+  Options(mouse: False, paste: False)
+}
+
 pub type Error {
   TerminalUnsupported(reason: String)
   IOError(reason: String)
