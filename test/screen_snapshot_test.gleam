@@ -19,6 +19,7 @@ import etui/buffer
 import etui/geometry.{Position}
 import etui/text
 import etui_lab
+import etui_lab_inline
 import etui_showcase
 import gleam/list
 import gleam/string
@@ -290,4 +291,47 @@ pub fn the_text_screen_expands_tabs_test() {
   let buf = lab_frame("5", 96, 28)
   string.contains(row_text(buf, 18, 96), "cells=17")
   |> should.equal(True)
+}
+
+// ─────────────────────────────────────────────────────────────────
+// The inline bench
+//
+// An inline viewport cannot be shown from inside a full-screen app, so it has
+// its own entry point. Its renderer is still a plain function.
+
+pub fn the_inline_panel_fits_its_six_rows_test() {
+  // The panel is drawn into the bottom rows of the terminal, so its area does
+  // not start at the origin. Every row still has to fill its width.
+  let area = geometry.rect_new(0, 18, 70, etui_lab_inline.rows)
+  let buf = etui_lab_inline.render(etui_lab_inline.initial(), area)
+  list.each(indices(etui_lab_inline.rows), fn(i) {
+    let y = 18 + i
+    #(y, text.cell_width(row_text_at(buf, y, 0, 70)))
+    |> should.equal(#(y, 70))
+  })
+}
+
+pub fn the_inline_panel_shows_its_progress_test() {
+  let area = geometry.rect_new(0, 18, 70, etui_lab_inline.rows)
+  let advanced =
+    list.fold(indices(7), etui_lab_inline.initial(), fn(m, _) {
+      etui_lab_inline.update(backend.Tick, m)
+    })
+  string.contains(
+    row_text_at(etui_lab_inline.render(advanced, area), 19, 0, 70),
+    "7%",
+  )
+  |> should.equal(True)
+}
+
+fn row_text_at(buf: buffer.Buffer, y: Int, x0: Int, width: Int) -> String {
+  indices(width)
+  |> list.map(fn(i) {
+    let cell = buffer.get_cell(buf, Position(x0 + i, y))
+    case buffer.is_continuation(cell) {
+      True -> ""
+      False -> buffer.cell_symbol(cell)
+    }
+  })
+  |> string.concat
 }
