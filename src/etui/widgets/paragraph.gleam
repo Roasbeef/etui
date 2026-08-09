@@ -63,7 +63,32 @@ pub fn paragraph_new_lines(lines: List(span.Line)) -> SpanParagraph {
   SpanParagraph(lines: lines)
 }
 
+/// Render styled text into `area`, wrapping it to the area width.
+///
+/// This is the one to reach for when text has both mixed styles and enough of
+/// it to need reflowing. `render_styled` puts one `Line` per row and lets
+/// anything too wide fall off the edge; `paragraph_new` wraps but only takes a
+/// plain `String`, so it cannot carry styles.
+///
+/// ```gleam
+/// span.text_new([
+///   span.line_new([span.span_bold("ERROR"), span.span_plain(" disk full")]),
+/// ])
+/// |> paragraph.render_text(buf, area, _)
+/// ```
+pub fn render_text(
+  buf: buffer.Buffer,
+  area: geometry.Rect,
+  content: span.Text,
+) -> buffer.Buffer {
+  case area.size.width <= 0 || area.size.height <= 0 {
+    True -> buf
+    False -> render_styled(buf, area, span.wrap(content, area.size.width).lines)
+  }
+}
+
 /// Render a `SpanParagraph` into `area`. Lines beyond area height are clipped.
+/// Does not wrap: see `render_text` for that.
 pub fn render_lines_styled(
   buf: buffer.Buffer,
   area: geometry.Rect,

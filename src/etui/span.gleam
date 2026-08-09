@@ -18,6 +18,7 @@ import etui/style
 import etui/text
 import gleam/int
 import gleam/list
+import gleam/string
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -37,6 +38,16 @@ pub type Span {
 /// A single terminal row composed of styled spans.
 pub type Line {
   Line(spans: List(Span), alignment: text.Alignment)
+}
+
+/// Several lines of styled text.
+///
+/// `Line` is one row and never wraps; `Text` is a block that does. Until this
+/// existed, wrapping only worked on a plain `String`, so any text that needed
+/// both mixed styles and reflowing, a log viewer or rendered markdown, could
+/// not have both.
+pub type Text {
+  Text(lines: List(Line))
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -220,6 +231,219 @@ fn render_spans(
             )
           render_spans(buf2, pos, rest, x + w, x_end)
         }
+      }
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Wrapping
+
+/// Text from a single unstyled string, split on newlines.
+pub fn text_plain(content: String) -> Text {
+  Text(
+    lines: content
+    |> text.normalise_newlines
+    |> string.split("\n")
+    |> list.map(line_plain),
+  )
+}
+
+/// Text from lines.
+pub fn text_new(lines: List(Line)) -> Text {
+  Text(lines: lines)
+}
+
+/// Total rows.
+pub fn text_height(t: Text) -> Int {
+  list.length(t.lines)
+}
+
+/// Wrap every line to `width` cells, keeping each span's style.
+///
+/// ```gleam
+/// span.line_new([span.span_bold("ERROR"), span.span_plain(" disk full")])
+/// |> span.text_new([_])
+/// |> span.wrap(12)
+/// // ERROR disk   <- still bold
+/// // full
+/// ```
+pub fn wrap(t: Text, width: Int) -> Text {
+  case width <= 0 {
+    True -> Text(lines: [])
+    False -> Text(lines: list.flat_map(t.lines, wrap_line(_, width)))
+  }
+}
+
+/// Wrap one line into as many as it takes.
+///
+/// Words are the unit, as in `text.wrap`, and a word wider than the line is
+/// broken across rows rather than left to overflow. A word never loses its
+/// style by being moved to another row, which is the whole point: the styles
+/// travel with the words rather than with the columns they happened to be in.
+pub fn wrap_line(l: Line, width: Int) -> List(Line) {
+  case width <= 0 {
+    True -> []
+    False ->
+      case tokenise(l.spans, []) {
+        // An empty line stays one empty line rather than vanishing.
+        [] -> [Line(spans: [], alignment: l.alignment)]
+        words -> pack(words, width, l.alignment, 0, [], [])
+      }
+  }
+}
+
+// A word carries the span it came from, so its style survives being moved.
+type Word {
+  Word(content: String, style: Span)
+}
+
+fn tokenise(spans: List(Span), acc: List(Word)) -> List(Word) {
+  case spans {
+    [] -> list.reverse(acc)
+    [sp, ..rest] -> {
+      let words =
+        sp.content
+        |> string.split(" ")
+        |> list.filter(fn(w) { w != "" })
+        |> list.map(fn(w) { Word(content: w, style: sp) })
+      tokenise(rest, list.append(list.reverse(words), acc))
+    }
+  }
+}
+
+fn pack(
+  words: List(Word),
+  width: Int,
+  alignment: text.Alignment,
+  current_width: Int,
+  current: List(Span),
+  done: List(Line),
+) -> List(Line) {
+  case words {
+    [] ->
+      list.reverse([
+        Line(spans: list.reverse(current), alignment: alignment),
+        ..done
+      ])
+    [w, ..rest] -> {
+      let word_width = text.cell_width(w.content)
+      let gap = case current {
+        [] -> 0
+        _ -> 1
+      }
+      case current_width + gap + word_width <= width {
+        True ->
+          pack(
+            rest,
+            width,
+            alignment,
+            current_width + gap + word_width,
+            push(current, spaced(w.content, gap), w.style),
+            done,
+          )
+        False ->
+          case word_width <= width {
+            // Starts the next row whole.
+            True ->
+              pack(
+                rest,
+                width,
+                alignment,
+                word_width,
+                push([], w.content, w.style),
+                flush(current, alignment, done),
+              )
+            // Wider than any row: break it across rows.
+            False -> {
+              let #(head, tail) =
+                split_at_width(w.content, width - current_width - gap)
+              case head {
+                "" -> {
+                  let #(h2, t2) = split_at_width(w.content, width)
+                  pack(
+                    [Word(content: t2, style: w.style), ..rest],
+                    width,
+                    alignment,
+                    text.cell_width(h2),
+                    push([], h2, w.style),
+                    flush(current, alignment, done),
+                  )
+                }
+                _ ->
+                  pack(
+                    [Word(content: tail, style: w.style), ..rest],
+                    width,
+                    alignment,
+                    0,
+                    [],
+                    flush(
+                      push(current, spaced(head, gap), w.style),
+                      alignment,
+                      done,
+                    ),
+                  )
+              }
+            }
+          }
+      }
+    }
+  }
+}
+
+fn spaced(content: String, gap: Int) -> String {
+  case gap {
+    0 -> content
+    _ -> " " <> content
+  }
+}
+
+fn flush(
+  current: List(Span),
+  alignment: text.Alignment,
+  done: List(Line),
+) -> List(Line) {
+  [Line(spans: list.reverse(current), alignment: alignment), ..done]
+}
+
+// Append to the span being built when the style matches, so a wrapped line
+// does not come back as one span per word.
+fn push(current: List(Span), content: String, proto: Span) -> List(Span) {
+  case current {
+    [head, ..rest] ->
+      case same_style(head, proto) {
+        True -> [Span(..head, content: head.content <> content), ..rest]
+        False -> [Span(..proto, content: content), ..current]
+      }
+    [] -> [Span(..proto, content: content)]
+  }
+}
+
+fn same_style(a: Span, b: Span) -> Bool {
+  a.fg == b.fg && a.bg == b.bg && a.modifier == b.modifier && a.link == b.link
+}
+
+// Take as many graphemes as fit in `budget` cells.
+fn split_at_width(content: String, budget: Int) -> #(String, String) {
+  case budget <= 0 {
+    True -> #("", content)
+    False -> take_cells(string.to_graphemes(content), budget, 0, "")
+  }
+}
+
+fn take_cells(
+  graphemes: List(String),
+  budget: Int,
+  used: Int,
+  head: String,
+) -> #(String, String) {
+  case graphemes {
+    [] -> #(head, "")
+    [g, ..rest] -> {
+      let w = text.grapheme_cell_width(g)
+      case used + w > budget {
+        True -> #(head, string.concat([g, ..rest]))
+        False -> take_cells(rest, budget, used + w, head <> g)
       }
     }
   }
