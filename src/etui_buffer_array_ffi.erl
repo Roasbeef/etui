@@ -1,5 +1,6 @@
 -module(etui_buffer_array_ffi).
--export([new/2, get/2, set/3, fill_string/8, fill_all_rows/8]).
+-export([new/2, get/2, set/3, fill_string/8, fill_all_rows/8,
+         draft/1, draft_set/3, draft_get/2, commit/1]).
 -on_load(init_module/0).
 
 %% Pre-allocate {content, <<B>>, 1} tuples for all 256 bytes on module load.
@@ -22,6 +23,15 @@ get(Index, Arr) ->
 
 set(Index, Value, Arr) ->
     array:set(Index, Value, Arr).
+
+%% Batched writes. Erlang's array is already a persistent trie, so a draft is
+%% the array itself and these are all identity or a plain set; the distinction
+%% exists for the JavaScript side, where a naive copy-on-write set made a full
+%% buffer fill quadratic.
+draft(Arr) -> Arr.
+draft_set(Index, Value, Arr) -> array:set(Index, Value, Arr).
+draft_get(Index, Arr) -> array:get(Index, Arr).
+commit(Arr) -> Arr.
 
 %% Fill cells in Arr[StartIdx..MaxIdx) from a UTF-8 binary string.
 %% Cell tuples are constructed directly, avoids Gleam list/fold overhead.

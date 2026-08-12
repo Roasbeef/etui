@@ -257,51 +257,53 @@ fn wrap_para(s: String, max_width: Int) -> List(String) {
 }
 
 fn wrap_para_words(s: String, max_width: Int) -> List(String) {
-  let words = string.split(s, " ")
-  // rev_lines holds finished lines newest-first, reversed once at the end, so
-  // the fold only ever prepends. This keeps wrapping O(n), not O(n^2).
-  let #(rev_lines, curr) =
-    list.fold(words, #([], ""), fn(acc, word) {
-      let #(lines_acc, curr_line) = acc
-      let w_width = cell_width(word)
-      let curr_width = cell_width(curr_line)
-      let space_w = case curr_line {
-        "" -> 0
+  // The line being built is kept as its words, newest first, next to its
+  // width. Both matter: measuring the joined line on every word walks its
+  // graphemes again and again, and rebuilding it with <> copies it again and
+  // again, so a long line cost time quadratic in its own length. Each word is
+  // now measured once and each line joined once.
+  let #(rev_lines, rev_current, _) =
+    list.fold(string.split(s, " "), #([], [], 0), fn(acc, word) {
+      let #(lines, current, width) = acc
+      let word_width = cell_width(word)
+      let gap = case current {
+        [] -> 0
         _ -> 1
       }
-      case curr_width + space_w + w_width <= max_width {
-        True -> {
-          let new_line = case curr_line {
-            "" -> word
-            _ -> curr_line <> " " <> word
-          }
-          #(lines_acc, new_line)
-        }
+      case width + gap + word_width <= max_width {
+        True -> #(lines, [word, ..current], width + gap + word_width)
         False -> {
-          let lines2 = case curr_line {
-            "" -> lines_acc
-            _ -> [curr_line, ..lines_acc]
+          let closed = case current {
+            [] -> lines
+            _ -> [join_words(current), ..lines]
           }
-          case w_width <= max_width {
-            True -> #(lines2, word)
+          case word_width <= max_width {
+            True -> #(closed, [word], word_width)
             False -> {
-              // Word wider than max_width: hard-break into chunks. The last
-              // chunk becomes the new current line, the rest are finished.
-              let chunks = hard_break_word(word, max_width)
-              case list.reverse(chunks) {
-                [] -> #(lines2, "")
-                [last, ..rest_rev] -> #(list.append(rest_rev, lines2), last)
+              // Wider than the whole line: break it, and carry the last piece
+              // on as the start of the next line.
+              case list.reverse(hard_break_word(word, max_width)) {
+                [] -> #(closed, [], 0)
+                [last, ..rest_rev] -> #(
+                  list.append(rest_rev, closed),
+                  [last],
+                  cell_width(last),
+                )
               }
             }
           }
         }
       }
     })
-  let all_rev = case curr {
-    "" -> rev_lines
-    _ -> [curr, ..rev_lines]
+  let all_rev = case rev_current {
+    [] -> rev_lines
+    _ -> [join_words(rev_current), ..rev_lines]
   }
   list.reverse(all_rev)
+}
+
+fn join_words(rev_words: List(String)) -> String {
+  string.join(list.reverse(rev_words), " ")
 }
 
 // Split a single token into chunks of at most max_width cells.

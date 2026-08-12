@@ -27,6 +27,34 @@ fn array_get(index: Int, arr: CellArray) -> Cell
 @external(javascript, "../etui_buffer_array_ffi.mjs", "set")
 fn array_set(index: Int, value: Cell, arr: CellArray) -> CellArray
 
+/// A run of writes.
+///
+/// The JavaScript store has to copy the cell array to keep an old buffer
+/// intact, so writing a cell at a time makes filling a buffer quadratic in its
+/// size: a 200x50 fill cost about 35 ms, more than a whole 60 fps frame. A
+/// draft copies once and writes many times. Erlang's array is a persistent
+/// trie already, so there a draft is the array itself.
+///
+/// A draft must not escape the loop that made it. Every use below takes one,
+/// writes, and commits within a single function.
+pub type Draft
+
+@external(erlang, "etui_buffer_array_ffi", "draft")
+@external(javascript, "../etui_buffer_array_ffi.mjs", "draft")
+fn draft(arr: CellArray) -> Draft
+
+@external(erlang, "etui_buffer_array_ffi", "draft_set")
+@external(javascript, "../etui_buffer_array_ffi.mjs", "draftSet")
+fn draft_set(index: Int, value: Cell, d: Draft) -> Draft
+
+@external(erlang, "etui_buffer_array_ffi", "draft_get")
+@external(javascript, "../etui_buffer_array_ffi.mjs", "draftGet")
+fn draft_get(index: Int, d: Draft) -> Cell
+
+@external(erlang, "etui_buffer_array_ffi", "commit")
+@external(javascript, "../etui_buffer_array_ffi.mjs", "commit")
+fn commit(d: Draft) -> CellArray
+
 /// Bulk-fill all Width×Height cells from a single row text using array:from_list.
 /// Erlang only, JS falls back to the Gleam body (repeated fill_graphemes).
 /// Faster than fill_string called per-row because the trie is built once.
@@ -132,6 +160,19 @@ fn fill_graphemes(
   modifier: style.Modifier,
   link: String,
 ) -> CellArray {
+  commit(fill_draft(draft(arr), idx, max_idx, gs, fg, bg, modifier, link))
+}
+
+fn fill_draft(
+  arr: Draft,
+  idx: Int,
+  max_idx: Int,
+  gs: List(String),
+  fg: style.Color,
+  bg: style.Color,
+  modifier: style.Modifier,
+  link: String,
+) -> Draft {
   case idx >= max_idx {
     True -> arr
     False ->
@@ -152,25 +193,14 @@ fn fill_graphemes(
             // max_idx, leave the cell blank: writing the glyph anyway made it
             // overflow the clip boundary and shift everything to its right.
             True if idx + 1 >= max_idx ->
-              fill_graphemes(
-                arr,
-                idx + 1,
-                max_idx,
-                rest,
-                fg,
-                bg,
-                modifier,
-                link,
-              )
-            True -> {
-              let arr3 =
-                array_set(
+              fill_draft(arr, idx + 1, max_idx, rest, fg, bg, modifier, link)
+            True ->
+              fill_draft(
+                draft_set(
                   idx + 1,
                   continuation_cell(fg, bg, modifier),
-                  array_set(idx, cell, arr),
-                )
-              fill_graphemes(
-                arr3,
+                  draft_set(idx, cell, arr),
+                ),
                 idx + 2,
                 max_idx,
                 rest,
@@ -179,10 +209,9 @@ fn fill_graphemes(
                 modifier,
                 link,
               )
-            }
             False ->
-              fill_graphemes(
-                array_set(idx, cell, arr),
+              fill_draft(
+                draft_set(idx, cell, arr),
                 idx + 1,
                 max_idx,
                 rest,
@@ -425,24 +454,24 @@ pub fn clear(buffer: Buffer, rect: geometry.Rect) -> Buffer {
     Ok(r) ->
       Buffer(
         ..buffer,
-        cells: clear_rows(
+        cells: commit(clear_rows(
           buffer.area,
-          buffer.cells,
+          draft(buffer.cells),
           r,
           empty_cell(),
           r.position.y,
-        ),
+        )),
       )
   }
 }
 
 fn clear_rows(
   area: geometry.Rect,
-  cells: CellArray,
+  cells: Draft,
   r: geometry.Rect,
   blank: Cell,
   y: Int,
-) -> CellArray {
+) -> Draft {
   case y >= geometry.bottom(r) {
     True -> cells
     False -> {
@@ -454,15 +483,10 @@ fn clear_rows(
   }
 }
 
-fn clear_row(
-  cells: CellArray,
-  blank: Cell,
-  idx: Int,
-  idx_max: Int,
-) -> CellArray {
+fn clear_row(cells: Draft, blank: Cell, idx: Int, idx_max: Int) -> Draft {
   case idx >= idx_max {
     True -> cells
-    False -> clear_row(array_set(idx, blank, cells), blank, idx + 1, idx_max)
+    False -> clear_row(draft_set(idx, blank, cells), blank, idx + 1, idx_max)
   }
 }
 
@@ -501,7 +525,15 @@ pub fn blit(
         Ok(d) ->
           Buffer(
             ..dst,
-            cells: blit_rows(src, dst.area, dst.cells, d, dx, dy, d.position.y),
+            cells: commit(blit_rows(
+              src,
+              dst.area,
+              draft(dst.cells),
+              d,
+              dx,
+              dy,
+              d.position.y,
+            )),
           )
       }
     }
@@ -511,12 +543,12 @@ pub fn blit(
 fn blit_rows(
   src: Buffer,
   dst_area: geometry.Rect,
-  cells: CellArray,
+  cells: Draft,
   d: geometry.Rect,
   dx: Int,
   dy: Int,
   y: Int,
-) -> CellArray {
+) -> Draft {
   case y >= geometry.bottom(d) {
     True -> cells
     False -> {
@@ -540,20 +572,20 @@ fn blit_rows(
 
 fn blit_row(
   src_cells: CellArray,
-  cells: CellArray,
+  cells: Draft,
   src_base: Int,
   dst_base: Int,
   x: Int,
   x_min: Int,
   x_max: Int,
-) -> CellArray {
+) -> Draft {
   case x >= x_max {
     True -> cells
     False -> {
       let cell = array_get(src_base + x, src_cells)
       blit_row(
         src_cells,
-        array_set(dst_base + x, clip_edge(cell, x, x_min, x_max), cells),
+        draft_set(dst_base + x, clip_edge(cell, x, x_min, x_max), cells),
         src_base,
         dst_base,
         x + 1,
@@ -589,18 +621,24 @@ pub fn set_style(
     Ok(r) ->
       Buffer(
         ..buffer,
-        cells: style_rows(buffer.area, buffer.cells, r, s, r.position.y),
+        cells: commit(style_rows(
+          buffer.area,
+          draft(buffer.cells),
+          r,
+          s,
+          r.position.y,
+        )),
       )
   }
 }
 
 fn style_rows(
   area: geometry.Rect,
-  cells: CellArray,
+  cells: Draft,
   r: geometry.Rect,
   s: style.Style,
   y: Int,
-) -> CellArray {
+) -> Draft {
   case y >= geometry.bottom(r) {
     True -> cells
     False -> {
@@ -612,18 +650,13 @@ fn style_rows(
   }
 }
 
-fn style_row(
-  cells: CellArray,
-  s: style.Style,
-  idx: Int,
-  idx_max: Int,
-) -> CellArray {
+fn style_row(cells: Draft, s: style.Style, idx: Int, idx_max: Int) -> Draft {
   case idx >= idx_max {
     True -> cells
     False -> {
-      let cell = array_get(idx, cells)
+      let cell = draft_get(idx, cells)
       let restyled = Cell(..cell, fg: s.fg, bg: s.bg, modifier: s.modifier)
-      style_row(array_set(idx, restyled, cells), s, idx + 1, idx_max)
+      style_row(draft_set(idx, restyled, cells), s, idx + 1, idx_max)
     }
   }
 }
