@@ -807,8 +807,8 @@ pub type FlexJustify =
 
 /// Split a rect with both a fixed gap between children and a rule for the
 /// space nobody claimed. This is the general form; `split`, `split_h`,
-/// `split_v`, `split_with_spacing` and `split_flex` are all this function with
-/// some arguments filled in.
+/// `split_v` and `split_with_spacing` are all this function with some
+/// arguments filled in.
 ///
 /// `spacing` is a gap that always sits between children and is taken out of
 /// the budget before the constraints are resolved. `flex` then places whatever
@@ -961,20 +961,6 @@ fn rects_loop(
     }
     _, _ -> list.reverse(acc)
   }
-}
-
-/// Flex layout with a minimum gap between children.
-///
-/// Kept for the name; `split_with` is the same function with its arguments in
-/// the order the rest of the module uses.
-pub fn split_flex(
-  direction: Direction,
-  area: Rect,
-  constraints: List(Constraint),
-  justify: Flex,
-  gap: Int,
-) -> List(Rect) {
-  split_with(direction, area, constraints, justify, gap)
 }
 
 // ─────────────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+@target(javascript)
 /// Node.js terminal backend for the JavaScript target.
 ///
 /// Provides the same `Backend` interface as `erlang.gleam` but uses
@@ -26,7 +27,7 @@
 import etui/backend.{
   type Error, type InputEvent, type RenderOp, type TerminalSize, ClearScreen,
   DisableBracketedPaste, DisableMouse, EnableBracketedPaste, EnableMouse,
-  EnterAltScreen, ExitAltScreen, IOError, MoveCursor, Resize, Tick, Write,
+  EnterAltScreen, ExitAltScreen, MoveCursor, Resize, Tick, Write,
 }
 @target(javascript)
 import etui/input
@@ -43,6 +44,7 @@ import gleam/list
 // ─────────────────────────────────────────────────────────────────
 // Types
 
+@target(javascript)
 pub type NodeState {
   NodeState(
     cols: Int,

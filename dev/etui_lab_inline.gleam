@@ -89,7 +89,7 @@ pub fn render(m: Model, area: Rect) -> buffer.Buffer {
             gauge.gauge_new(percent(m))
               |> gauge.with_colors(good, style.Indexed(236)),
           )
-          |> line(label_area, [
+          |> line_at(label_area, [
             tinted(
               " " <> int.to_string(percent(m)) <> "% of nothing in particular",
               muted,
@@ -98,13 +98,13 @@ pub fn render(m: Model, area: Rect) -> buffer.Buffer {
         _ -> buf
       }
       buf
-      |> line(key_row, [
+      |> line_at(key_row, [
         tinted("last key  ", muted),
         span.span_plain(m.last_key),
         tinted("    frames ", muted),
         span.span_plain(int.to_string(m.ticks)),
       ])
-      |> line(hint_row, [
+      |> line_at(hint_row, [
         tinted(
           "the lines above are untouched; q leaves this panel where it is",
           muted,
@@ -119,18 +119,17 @@ fn tinted(s: String, c: style.Color) -> span.Span {
   span.span_plain(s) |> span.span_fg(c)
 }
 
-fn line(
+fn line_at(
+  buf: buffer.Buffer,
   area: Rect,
   spans: List(span.Span),
-) -> fn(buffer.Buffer) -> buffer.Buffer {
-  fn(buf) {
-    span.render_line(
-      buf,
-      geometry.Position(x: area.position.x, y: area.position.y),
-      span.line_new(spans),
-      area.size.width,
-    )
-  }
+) -> buffer.Buffer {
+  span.render_line(
+    buf,
+    geometry.Position(x: area.position.x, y: area.position.y),
+    span.line_new(spans),
+    area.size.width,
+  )
 }
 
 // A little context above the panel, so there is scrollback to not disturb.

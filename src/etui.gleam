@@ -30,6 +30,7 @@
 /// | `etui/app` | Application event loops (`run`, `run_buffered`, `run_animated`, `run_buffered_cursor`) |
 /// | `etui/terminal` | Drive rendering from your own loop (`new`, `draw`, `poll`, `restore`), full screen or inline |
 /// | `etui/backend` | Terminal event types and render ops |
+/// | `etui/input` | Raw bytes to `InputEvent`, pure and target-independent |
 /// | `etui/backend/default` | Platform-selecting backend (`new()` works on Erlang and JS) |
 /// | `etui/buffer` | Cell grid storage, Unicode-aware rendering, diff output |
 /// | `etui/geometry` | Layout math: `Rect`, `Constraint`, `split`, `resolve_sizes` |
@@ -44,6 +45,7 @@
 /// | `etui/focus` | Focus-ring for multi-panel UIs |
 /// | `etui/undo` | Generic undo/redo history stack |
 /// | `etui/color` | RGB interpolation, gradients, hue-to-RGB |
+/// | `etui/widget` | `Widget` and `StatefulWidget`, plus composition helpers |
 ///
 /// ### Widgets
 ///

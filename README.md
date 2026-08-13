@@ -17,7 +17,7 @@ Inspired by [ratatui](https://ratatui.rs/): buffer-diff rendering, layout constr
 
 > *étui* (French): a small, fitted case that holds and protects delicate instruments. This library is that case for your terminal: a snug shell around buffers, widgets, and Unicode, so your app stays clean inside.
 
-**Requirements:** Gleam 1.16+, Erlang/OTP 26+ for terminal apps. Node 22+ only for the JavaScript target smoke path.
+**Requirements:** Gleam 1.16+, Erlang/OTP 26+ for terminal apps, Node 22+ for the JavaScript target. Both targets run the full test suite and the full demos.
 
 ```text
 ┌─ Sidebar ──┐┌─ Main ──────────────────────────┐
@@ -31,7 +31,9 @@ Inspired by [ratatui](https://ratatui.rs/): buffer-diff rendering, layout constr
 
 **Unicode-correct.** Cell width, not codepoints. `cell_width("你好") == 4`. Grapheme clusters come from Erlang's native UAX #29 segmentation. ZWJ sequences, combining marks, and regional indicators all cluster correctly.
 
-**Crash-restore.** `app.run` wraps the event loop in Erlang `try...after`. The terminal is restored before any exception propagates, and on normal exit and supported abort paths.
+**Crash-restore.** `app.run` wraps the event loop in Erlang `try...after`. The terminal is restored before any exception propagates, and on normal exit and supported abort paths. Drive the loop yourself with `etui/terminal` and restoring it is yours to arrange.
+
+**Your loop or ours.** `app.run_*` owns the event loop; `etui/terminal` hands it back, for when the terminal is not the only thing your program is doing. Full screen, or `Inline(rows)` for a panel that leaves the shell's scrollback alone and stays on screen after you exit.
 
 **No-jitter layout.** `geometry.resolve_sizes` allocates on boundaries, not widths. Rounding errors don't accumulate across columns.
 
@@ -47,7 +49,7 @@ Or in `gleam.toml`:
 
 ```toml
 [dependencies]
-etui = ">= 1.0.0 and < 2.0.0"
+etui = ">= 2.0.0 and < 3.0.0"
 ```
 
 ## Quickstart

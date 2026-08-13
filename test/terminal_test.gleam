@@ -3,16 +3,26 @@
 /// the parts the app loops used to hide: what a frame actually emits, that a
 /// second frame emits only what changed, and that a resize forces a repaint.
 import etui/backend
+@target(erlang)
 import etui/buffer
+@target(erlang)
 import etui/cursor
+@target(erlang)
 import etui/geometry.{Position, rect_new}
 
+@target(erlang)
 import etui/style
+@target(erlang)
 import etui/terminal
+@target(erlang)
 import etui/widgets/paragraph
+@target(erlang)
 import gleam/list
+@target(erlang)
 import gleam/result
+@target(erlang)
 import gleam/string
+@target(erlang)
 import gleeunit/should
 
 // ─────────────────────────────────────────────────────────────────
@@ -458,4 +468,102 @@ pub fn the_viewport_is_readable_back_test() {
     )
   terminal.viewport(term)
   |> should.equal(terminal.Inline(4))
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Carrying a value out of a frame
+
+@target(erlang)
+pub fn draw_with_returns_what_the_frame_worked_out_test() {
+  // The rects a layout produced, so a later click can be matched against the
+  // layout that was actually drawn rather than one recomputed and hoped to be
+  // the same.
+  let assert Ok(term) = terminal.new(recorder([], backend.TerminalSize(40, 10)))
+  let assert Ok(#(_, panes)) =
+    terminal.draw_with(term, fn(frame) {
+      let panes = geometry.split_h(frame.area, [geometry.Fill, geometry.Fill])
+      #(frame, panes)
+    })
+  panes
+  |> should.equal([rect_new(0, 0, 20, 10), rect_new(20, 0, 20, 10)])
+}
+
+@target(erlang)
+pub fn draw_is_draw_with_discarding_test() {
+  let assert Ok(a) = terminal.new(recorder([], backend.TerminalSize(20, 4)))
+  let assert Ok(b) = terminal.new(recorder([], backend.TerminalSize(20, 4)))
+  let assert Ok(drawn_a) = terminal.draw(a, text_frame("hello"))
+  let assert Ok(#(drawn_b, Nil)) =
+    terminal.draw_with(b, fn(frame) { #(text_frame("hello")(frame), Nil) })
+  terminal.area(drawn_a)
+  |> should.equal(terminal.area(drawn_b))
+}
+
+@target(erlang)
+pub fn a_failed_render_carries_nothing_out_test() {
+  let assert Ok(term) =
+    terminal.new(silent_after(recorder([], backend.TerminalSize(20, 4)), 1))
+  terminal.draw_with(term, fn(frame) { #(text_frame("hello")(frame), "value") })
+  |> result.is_ok
+  |> should.equal(False)
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Handing the terminal back
+
+@target(erlang)
+pub fn a_fullscreen_viewport_opens_on_the_alternate_screen_test() {
+  list.map(terminal.open_viewport(terminal.Fullscreen), describe)
+  |> should.equal(["OTHER"])
+}
+
+@target(erlang)
+pub fn an_inline_viewport_makes_room_for_itself_test() {
+  // It prints its own height in newlines, which scrolls whatever the shell had
+  // printed up and leaves the bottom rows blank. Without it the first frame
+  // would draw over the last lines of output.
+  case terminal.open_viewport(terminal.Inline(3)) {
+    [_exit_alt, backend.Write(made_room)] ->
+      made_room
+      |> should.equal("\n\n\n")
+    other -> {
+      list.map(other, describe)
+      |> should.equal([])
+      Nil
+    }
+  }
+}
+
+@target(erlang)
+pub fn a_fullscreen_terminal_just_shows_the_cursor_on_the_way_out_test() {
+  // The alternate screen takes the app's output with it, so there is nothing
+  // to position the prompt after.
+  list.map(
+    terminal.close_viewport(terminal.Fullscreen, rect_new(0, 0, 20, 4)),
+    describe,
+  )
+  |> should.equal(["W:" <> cursor.show()])
+}
+
+@target(erlang)
+pub fn an_inline_terminal_leaves_the_cursor_below_its_panel_test() {
+  // So the shell prompt continues after the output instead of over it. The
+  // panel occupies rows 7 to 11, so the cursor goes to the last of them and
+  // then down one.
+  let ops = terminal.close_viewport(terminal.Inline(5), rect_new(0, 7, 40, 5))
+  list.map(ops, describe)
+  |> should.equal(["MOVE:0,11", "W:\r\n" <> cursor.show()])
+}
+
+@target(erlang)
+pub fn a_fixed_viewport_exits_like_an_inline_one_test() {
+  // Both leave the normal screen intact, so both have to put the prompt
+  // somewhere sensible rather than wherever the last cell landed.
+  let area = rect_new(4, 2, 10, 3)
+  terminal.close_viewport(terminal.Fixed(area), area)
+  |> list.map(describe)
+  |> should.equal(
+    terminal.close_viewport(terminal.Inline(3), area)
+    |> list.map(describe),
+  )
 }

@@ -15,6 +15,9 @@ Small, but they will not compile silently:
   **`backend.RenderOp` gained `EnableBracketedPaste` and
   `DisableBracketedPaste`**. A `case` over either that was exhaustive without a
   `_ ->` arm now fails to compile. Adding the arm is the whole fix.
+- **`geometry.split_flex` is gone; use `split_with`.** After the layout rework
+  the two had the same arity, the same argument order and the same body, and
+  two names for one function is not an API.
 - **`keys.match` answers `Unknown` rather than `Char` for a multi-grapheme
   string.** With modified keys now reaching the app, `"shift+left"` would have
   arrived at a text field as a ten-grapheme "character" to insert. Single
@@ -36,8 +39,40 @@ Small, but they will not compile silently:
 - **`backend.MouseDrag` and `backend.MouseMove`,** with mouse tracking raised
   from click reporting (1000) to button-event reporting (1002) so drags are
   actually reported.
-- **`erlang.new_with_options` and `erlang.Options`.** `new` and
-  `new_with_mouse` are unchanged.
+- **`erlang.new_with_options` and `backend.Options`.** `new` and
+  `new_with_mouse` are unchanged. `default.new_with_options` is the same call
+  on both targets.
+- **`etui/terminal`:** drive rendering from your own loop. `new`, `draw`,
+  `draw_with`, `poll`, `restore`. The `app.run_*` loops are thin wrappers over
+  it now, and `app.gleam` went from 969 lines to 522 as a result.
+- **`terminal.Viewport`:** `Fullscreen`, `Inline(rows)` and `Fixed(rect)`. An
+  inline app draws in the bottom rows of the normal screen, leaves the
+  scrollback alone, and leaves its last frame on screen when it exits, which is
+  the shape a build tool or an installer wants.
+- **`geometry.split_with`:** one layout function taking a `Flex` and a spacing.
+  `split`, `split_h`, `split_v`, `split_with_spacing` and `split_flex` are all
+  this with arguments filled in.
+- **`geometry.FlexEvenly`,** and spacing that composes with the modes that
+  place their own gaps. `split_flex` documented spacing as ignored for
+  `FlexBetween` and `FlexAround`, so a toolbar could ask for a minimum gap
+  between buttons and silently not get one.
+- **`geometry.FillWeighted(weight)`:** proportional flexible space. `Fill` is
+  `FillWeighted(1)`, so the two mix.
+- **`style.sub_modifier`:** a style can now take a modifier away, not only add
+  one. A theme that sets bold everywhere and one widget that must not be bold
+  was previously impossible to express.
+- **`style.hidden` and `style.rapid_blink`.** Hidden reserves its cells without
+  drawing them, which is what a password field wants when it has to keep its
+  layout.
+- **`span.Text`:** wrapping that keeps the styles. Words carry the span they
+  came from, so a style travels with its word rather than with the column the
+  word started in. `paragraph.render_text` draws it.
+- **`keys.parse`, `keys.KeyEvent`, `keys.Modifiers`:** modified keys as data.
+  With `is`, `is_combo`, `ctrl`/`alt`/`shift`, and `to_string`, which names an
+  event the way it arrived so `parse` round-trips.
+- **`list.settle` and `table.settle`:** the state a widget will settle on for a
+  given height, so a scroll offset can persist between frames.
+- **`buffer.blit/4` and `buffer.set_style/3`.**
 
 - **`buffer.blit/4`:** copy a window of one buffer into another, clipped
   against both. Composite an off-screen canvas or a cached panel into the frame
@@ -52,6 +87,32 @@ Small, but they will not compile silently:
 
 ### Fixed
 
+- **The JavaScript target had none of the input work.** `node_ffi.mjs` and
+  `browser_ffi.mjs` each carried a JavaScript reimplementation of the key
+  normalisation, announced as mirroring the Erlang one. It stopped mirroring
+  anything the moment the Erlang side moved to `etui/input`, and the JavaScript
+  suite only exercised pure functions, so nothing noticed. Both FFIs now move
+  bytes and `etui/input` does the parsing on every target.
+- **Layout could return sizes that did not fit the area.**
+  `[Min(60), Min(60)]` in 100 cells resolved to 120 cells of sizes and the
+  second panel was silently truncated, so two identical constraints came out
+  different sizes. The property test that should have caught this had never
+  been run against `Min` or `Max`: its generator only emitted `Length`,
+  `Percentage` and `Fill`.
+- **A scrollbar with nothing to report painted over the panel border.** A
+  full-track thumb conveys nothing and the scrollbar usually sits on a border
+  column, so a list that fitted its panel replaced the border with a solid
+  block.
+- **Status bar sections overwrote each other.** Left, right and centre were
+  placed independently, so a narrow bar rendered them on top of one another.
+  They now get disjoint spans and truncate instead.
+- **Wrapping was quadratic in the length of a line.** `text.wrap` measured and
+  rebuilt the line it was assembling on every word, which made it five times
+  slower than the styled wrapper that does strictly more work.
+- **Filling a buffer on JavaScript was quadratic in its size.** The cell store
+  copied the whole array on every cell written, so a 200x50 fill cost 35 ms,
+  more than a 60 fps frame, and one showcase frame cost 16.8 ms. Writes are
+  batched now: 2.4 ms and 3.9 ms.
 - **Keys were dropped when typing fast or pasting:** the backend turned an
   entire read into one `KeyPress`, so everything after the first key in a
   buffered read was lost, and a sequence split across two reads was mangled.
@@ -85,6 +146,19 @@ Small, but they will not compile silently:
 
 ### Changed
 
+- **`Min` and `Max` resolve differently.** They were sized by one pass that
+  gave each `budget / count` and let `Fill` absorb the rest; they now take a
+  weight-proportional share bounded by their floor and ceiling, settled
+  iteratively. `[Min(10), Max(20), Fill]` in 90 cells was `[30, 20, 40]` and is
+  now `[35, 20, 35]`: the ten cells `Max` gives up are shared, because `Min` is
+  documented as a flexible participant and has as much claim on them as `Fill`.
+- **`Ratio` accumulates its fractions** rather than rounding each one alone,
+  which stops the cells left for anything else oscillating as the area grows.
+  Layout is not monotone under resize for `Min`, `Max` and `Ratio`; the limit
+  is measured, pinned by tests and documented on `resolve_sizes`.
+- **`geometry.inner` follows ratatui's saturation rule:** the origin moves in
+  by the margin unconditionally and only the size saturates.
+- **`Flex` is the type's name,** with `FlexJustify` kept as an alias.
 - **`text.wrap` and `buffer.clear` are O(n):** both had quadratic accumulation
   (list appends, string copies) in their inner loops.
 - **CI runs the suite on JavaScript as well as Erlang.** Only a smoke app ran

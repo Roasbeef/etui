@@ -1,3 +1,4 @@
+@target(javascript)
 /// Browser (xterm.js) terminal backend for the JavaScript target.
 ///
 /// Provides the same `AsyncBackend` interface as `node.gleam` but uses an
@@ -25,7 +26,7 @@
 import etui/backend.{
   type Error, type InputEvent, type RenderOp, type TerminalSize, ClearScreen,
   DisableBracketedPaste, DisableMouse, EnableBracketedPaste, EnableMouse,
-  EnterAltScreen, ExitAltScreen, IOError, MoveCursor, Resize, Tick, Write,
+  EnterAltScreen, ExitAltScreen, MoveCursor, Resize, Tick, Write,
 }
 @target(javascript)
 import etui/input
@@ -42,6 +43,7 @@ import gleam/list
 // ─────────────────────────────────────────────────────────────────
 // Types
 
+@target(javascript)
 pub type BrowserState {
   BrowserState(
     cols: Int,

@@ -4,6 +4,16 @@
          install_sigint_cleanup/1, uninstall_sigint_cleanup/0,
          write_cleanup/0]).
 
+%% Run something whose failure must not stop cleanup, and say so once rather
+%% than eighteen times. `catch Expr` is deprecated in OTP; this is the same
+%% intent written the way the language now wants it.
+try_(Fun) ->
+    try Fun() of
+        Value -> Value
+    catch
+        _:Reason -> {error, Reason}
+    end.
+
 %% Enter raw mode via user_drv.  shell:start_interactive({noshell, raw})
 %% routes through user_drv's existing prim_tty instance, no second
 %% prim_tty:init call, no linked-process conflicts.
@@ -22,9 +32,9 @@ enter_raw() ->
 exit_raw() ->
     stop_reader(),
     drain_input(50),
-    catch shell:start_interactive({noshell, cooked}),
-    catch io:setopts(user, [{echo, true}, {binary, false}]),
-    catch os:cmd("stty sane"),
+    try_(fun() -> shell:start_interactive({noshell, cooked}) end),
+    try_(fun() -> io:setopts(user, [{echo, true}, {binary, false}]) end),
+    try_(fun() -> os:cmd("stty sane") end),
     ok.
 
 %% Write terminal restore sequences directly to /dev/tty.
@@ -66,7 +76,7 @@ install_sigint_cleanup(CleanupFun) ->
     end,
     reset_watchdog(),
     install_watchdog(),
-    SetSignalResult = catch os:set_signal(sigint, handle),
+    SetSignalResult = try_(fun() -> os:set_signal(sigint, handle) end),
     case SetSignalResult of
         ok ->
             %% Erlang-level cleanup watcher.
@@ -78,10 +88,10 @@ install_sigint_cleanup(CleanupFun) ->
             %%    cleanup runs).
             Owner = self(),
             spawn(fun() ->
-                catch erlang:register(etui_sigint_watcher, self()),
+                try_(fun() -> erlang:register(etui_sigint_watcher, self()) end),
                 receive
                     {signal, sigint} ->
-                        catch CleanupFun(),
+                        try_(CleanupFun),
                         write_cleanup_to_tty(true),
                         kill_watchdog(),
                         erlang:halt(130);
@@ -90,7 +100,7 @@ install_sigint_cleanup(CleanupFun) ->
                             normal -> ok;
                             shutdown -> ok;
                             _ ->
-                                catch CleanupFun(),
+                                try_(CleanupFun),
                                 write_cleanup_to_tty(true),
                                 kill_watchdog()
                         end;
@@ -100,7 +110,7 @@ install_sigint_cleanup(CleanupFun) ->
             end),
             spawn(fun() ->
                 erlang:monitor(process, Owner),
-                receive_signals(catch erlang:whereis(etui_sigint_watcher))
+                receive_signals(try_(fun() -> erlang:whereis(etui_sigint_watcher) end))
             end),
             ok;
         _ ->
@@ -148,12 +158,12 @@ install_watchdog() ->
     %% Outer bash: launch orphan subshell and exit immediately.
     Script = "(" ++ Inner ++ ") &",
     spawn(fun() ->
-        case catch open_port(
+        case try_(fun() -> open_port(
             {spawn_executable, "/bin/bash"},
             [{args, ["-c", Script]}, binary, exit_status]
-        ) of
+        ) end) of
             Port when is_port(Port) ->
-                catch erlang:register(etui_watchdog_owner, self()),
+                try_(fun() -> erlang:register(etui_watchdog_owner, self()) end),
                 watchdog_loop(Port, Flag);
             _ ->
                 ok
@@ -164,15 +174,15 @@ watchdog_loop(Port, Flag) ->
     receive
         stop ->
             %% Normal cleanup: create flag so orphan exits without firing.
-            catch file:write_file(Flag, <<>>),
-            catch port_close(Port);
+            try_(fun() -> file:write_file(Flag, <<>>) end),
+            try_(fun() -> port_close(Port) end);
         {Port, _} ->
             watchdog_loop(Port, Flag)
     end.
 
 kill_watchdog() ->
     Flag = "/tmp/etui_cleanup_" ++ os:getpid(),
-    catch file:write_file(Flag, <<>>),
+    try_(fun() -> file:write_file(Flag, <<>>) end),
     case erlang:whereis(etui_watchdog_owner) of
         undefined -> ok;
         Pid -> Pid ! stop
@@ -180,7 +190,7 @@ kill_watchdog() ->
 
 reset_watchdog() ->
     Flag = "/tmp/etui_cleanup_" ++ os:getpid(),
-    catch file:delete(Flag),
+    try_(fun() -> file:delete(Flag) end),
     case erlang:whereis(etui_watchdog_owner) of
         undefined -> ok;
         Pid -> Pid ! stop
@@ -188,7 +198,7 @@ reset_watchdog() ->
 
 %% Restore default SIGINT behaviour and stop the watcher/watchdog.
 uninstall_sigint_cleanup() ->
-    catch os:set_signal(sigint, default),
+    try_(fun() -> os:set_signal(sigint, default) end),
     case erlang:whereis(etui_sigint_watcher) of
         undefined -> ok;
         Pid -> Pid ! stop
@@ -214,7 +224,7 @@ write_cleanup_to_tty(WithNewline) ->
                 ok ->
                     ok;
                 _ ->
-                    catch io:put_chars(Seq)
+                    try_(fun() -> io:put_chars(Seq) end)
             end
     end.
 
@@ -242,7 +252,7 @@ detect_tty_path() ->
     %% `tty` is not reliable here. Ask ps(1) for the controlling tty of the
     %% current BEAM process instead.
     Cmd = "ps -o tty= -p " ++ os:getpid(),
-    case catch string:trim(os:cmd(Cmd)) of
+    case try_(fun() -> string:trim(os:cmd(Cmd)) end) of
         TTY when is_list(TTY) ->
             normalise_tty_path(TTY);
         _ -> error
@@ -292,7 +302,7 @@ ensure_reader(Owner) ->
     case erlang:whereis(etui_kbd_reader) of
         undefined ->
             Pid = spawn(fun() -> reader_loop(Owner) end),
-            catch erlang:register(etui_kbd_reader, Pid);
+            try_(fun() -> erlang:register(etui_kbd_reader, Pid) end);
         _ -> ok
     end.
 

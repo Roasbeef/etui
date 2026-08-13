@@ -236,15 +236,18 @@ pub fn is_modifier(k: Key) -> Bool {
 
 /// True when `event` is exactly this key with nothing held.
 ///
+/// Named apart from `is_char` and friends on purpose: those ask what a `Key`
+/// is, this asks what happened.
+///
 /// ```gleam
-/// keys.is(keys.parse(raw), keys.Left)   // "left" yes, "shift+left" no
+/// keys.pressed(keys.parse(raw), keys.Left)   // "left" yes, "shift+left" no
 /// ```
-pub fn is(event: KeyEvent, code: Key) -> Bool {
+pub fn pressed(event: KeyEvent, code: Key) -> Bool {
   event.code == code && is_plain(event.modifiers)
 }
 
 /// True when `event` is this key with exactly these modifiers.
-pub fn is_combo(event: KeyEvent, code: Key, mods: Modifiers) -> Bool {
+pub fn pressed_with(event: KeyEvent, code: Key, mods: Modifiers) -> Bool {
   event.code == code && event.modifiers == mods
 }
 

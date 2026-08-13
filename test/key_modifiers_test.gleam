@@ -87,17 +87,17 @@ pub fn parse_reports_the_same_thing_as_a_key_plus_a_modifier_test() {
 // ─────────────────────────────────────────────────────────────────
 // Asking questions of an event
 
-pub fn is_matches_only_the_unmodified_key_test() {
-  keys.is(keys.parse("left"), Left)
+pub fn pressed_matches_only_the_unmodified_key_test() {
+  keys.pressed(keys.parse("left"), Left)
   |> should.equal(True)
-  keys.is(keys.parse("shift+left"), Left)
+  keys.pressed(keys.parse("shift+left"), Left)
   |> should.equal(False)
 }
 
-pub fn is_combo_matches_the_exact_combination_test() {
-  keys.is_combo(keys.parse("ctrl+right"), Right, keys.ctrl())
+pub fn pressed_with_matches_the_exact_combination_test() {
+  keys.pressed_with(keys.parse("ctrl+right"), Right, keys.ctrl())
   |> should.equal(True)
-  keys.is_combo(keys.parse("ctrl+shift+right"), Right, keys.ctrl())
+  keys.pressed_with(keys.parse("ctrl+shift+right"), Right, keys.ctrl())
   |> should.equal(False)
 }
 

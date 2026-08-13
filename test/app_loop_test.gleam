@@ -3,15 +3,25 @@
 /// `run_buffered_cursor`) end to end against a scripted mock backend.
 /// This is the safety net for the shared `step` core in `etui/app`.
 import etui/app
+@target(erlang)
 import etui/backend
+@target(erlang)
 import etui/buffer
+@target(erlang)
 import etui/geometry.{Fill, Horizontal, Length, Percentage, rect_new, split}
+@target(erlang)
 import etui/style
+@target(erlang)
 import etui/widgets/block
+@target(erlang)
 import etui/widgets/gauge
+@target(erlang)
 import etui/widgets/list as glist
+@target(erlang)
 import etui/widgets/table
+@target(erlang)
 import gleam/list
+@target(erlang)
 import gleeunit/should
 
 // ─────────────────────────────────────────────────────────────────

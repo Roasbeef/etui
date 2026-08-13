@@ -90,7 +90,9 @@ fn may_clear(vp: Viewport) -> Bool {
 /// An inline viewport prints its own height in newlines, which scrolls
 /// whatever was on screen up and leaves the bottom rows blank for the app.
 /// Without it the first frame would draw over the last lines of output.
-fn open_viewport(vp: Viewport) -> List(RenderOp) {
+///
+/// Public alongside `close_viewport`; see there.
+pub fn open_viewport(vp: Viewport) -> List(RenderOp) {
   case vp {
     Fullscreen -> [backend.EnterAltScreen]
     // The backends enter the alternate screen when they initialise, which is
@@ -104,7 +106,11 @@ fn open_viewport(vp: Viewport) -> List(RenderOp) {
 }
 
 /// Ops that hand the terminal back, once the app is done.
-fn close_viewport(vp: Viewport, area: Rect) -> List(RenderOp) {
+///
+/// Public for the same reason as `frame_ops`: what a viewport does on the way
+/// out is worth being able to check without a terminal to do it to, and for an
+/// inline app it is the visible difference from a full-screen one.
+pub fn close_viewport(vp: Viewport, area: Rect) -> List(RenderOp) {
   case vp {
     Fullscreen -> [backend.Write(cursor.show())]
     // Leave the cursor under the last frame so the shell prompt continues
@@ -167,6 +173,10 @@ pub fn hide_cursor(frame: Frame) -> Frame {
 /// A first frame, at start-up or after a resize, repaints everything: what the
 /// terminal is showing is unknown, so there is nothing to diff against. Every
 /// frame after that emits only the cells that changed.
+///
+/// Public because it is worth being able to check what a frame will emit
+/// without a terminal to emit it into, which is how the diffing and cursor
+/// rules are tested. `draw` is what an app calls.
 pub fn frame_ops(
   prev: buffer.Buffer,
   curr: buffer.Buffer,

@@ -10,7 +10,6 @@ import etui/style
 import etui/text
 import etui/widgets/paragraph
 import gleam/list
-import gleam/string
 import gleeunit/should
 
 fn rendered(t: Text) -> List(String) {
