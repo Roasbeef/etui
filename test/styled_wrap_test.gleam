@@ -4,12 +4,13 @@
 /// mixed styles and reflowing could not have both. These check that the styles
 /// travel with the words rather than with the columns they started in.
 import etui/buffer
-import etui/geometry
+import etui/geometry.{Position, Rect, Size}
 import etui/span.{type Line, type Text, Line, Span}
 import etui/style
 import etui/text
 import etui/widgets/paragraph
 import gleam/list
+import gleam/result
 import gleeunit/should
 
 fn rendered(t: Text) -> List(String) {
@@ -267,4 +268,53 @@ pub fn a_trailing_space_still_ends_a_word_test() {
   let line = span.line_new([span.span_bold("one "), span.span_plain("two")])
   rendered(span.wrap(one(line), 3))
   |> should.equal(["one", "two"])
+}
+
+/// The space between two words belongs to neither of them.
+///
+/// The wrapper drops the separating space at a line break and re-emits it
+/// between words that share a row. It used to re-emit it with the style of
+/// the word that followed, which nothing noticed while styles were colours on
+/// glyphs: a space has no glyph to colour. An underline does paint a space,
+/// so the line under a marked word started one cell early.
+pub fn the_separator_space_does_not_take_the_next_words_style_test() {
+  let marked =
+    span.span_styled("teh", style.underline_style())
+    |> span.span_underline_color(style.Rgb(255, 0, 0))
+  let line = span.line_new([span.span_plain("a "), marked])
+  let buf =
+    span.render_line(
+      buffer.buffer_new(Rect(Position(0, 0), Size(width: 6, height: 1))),
+      Position(0, 0),
+      span.wrap_line(line, 6) |> list.first |> result.unwrap(line),
+      6,
+    )
+
+  // Cell 1 is the space between "a" and "teh".
+  let gap = buffer.get_cell(buf, Position(1, 0))
+  style.has(buffer.cell_modifier(gap), style.underline()) |> should.equal(False)
+  buffer.cell_underline_color(gap) |> should.equal(style.Default)
+
+  // And the word itself still has both.
+  let word = buffer.get_cell(buf, Position(2, 0))
+  style.has(buffer.cell_modifier(word), style.underline())
+  |> should.equal(True)
+  buffer.cell_underline_color(word) |> should.equal(style.Rgb(255, 0, 0))
+}
+
+/// The mirror: a space that was inside a styled span keeps that style, so a
+/// highlighted phrase does not come back with holes where its spaces were.
+pub fn a_space_inside_a_styled_span_keeps_its_style_test() {
+  let highlight = style.new(style.Indexed(0), style.Indexed(4), style.none())
+  let line = span.line_new([span.span_styled("two words", highlight)])
+  let buf =
+    span.render_line(
+      buffer.buffer_new(Rect(Position(0, 0), Size(width: 9, height: 1))),
+      Position(0, 0),
+      span.wrap_line(line, 9) |> list.first |> result.unwrap(line),
+      9,
+    )
+
+  buffer.cell_bg(buffer.get_cell(buf, Position(3, 0)))
+  |> should.equal(style.Indexed(4))
 }

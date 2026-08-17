@@ -17,10 +17,12 @@ import etui/anim
 import etui/backend
 import etui/buffer
 import etui/geometry.{Position}
+import etui/style
 import etui/text
 import etui_lab
 import etui_lab_inline
 import etui_showcase
+import gleam/int
 import gleam/list
 import gleam/string
 import gleeunit/should
@@ -261,7 +263,7 @@ pub fn the_scroll_screen_reports_the_rows_it_was_given_test() {
 }
 
 pub fn every_lab_screen_fills_its_width_test() {
-  list.each(["1", "2", "3", "4", "5"], fn(key) {
+  list.each(["1", "2", "3", "4", "5", "6"], fn(key) {
     list.each([#(80, 24), #(120, 32)], fn(size) {
       let #(width, height) = size
       let buf = lab_frame(key, width, height)
@@ -285,6 +287,87 @@ pub fn the_text_screen_keeps_words_whole_across_styles_test() {
     |> string.join(" ")
   string.contains(joined, "etui.log,")
   |> should.equal(True)
+}
+
+// The UNDER screen is a claim about colour, and colour is exactly what
+// row_text throws away, so these read the cells.
+
+fn cell_at(buf: buffer.Buffer, x: Int, y: Int) -> buffer.Cell {
+  buffer.get_cell(buf, Position(x, y))
+}
+
+pub fn the_underline_screen_colours_the_line_not_the_text_test() {
+  let buf = lab_frame("6", 80, 24)
+  // First sample row, inside the sample column.
+  let sample = cell_at(buf, 18, 6)
+
+  buffer.cell_underline_color(sample) |> should.equal(style.Indexed(9))
+  style.has(buffer.cell_modifier(sample), style.underline())
+  |> should.equal(True)
+  // The text itself stays the terminal's colour: only the line is red.
+  buffer.cell_fg(sample) |> should.equal(style.Default)
+}
+
+pub fn the_underline_screen_control_row_asks_but_does_not_underline_test() {
+  // The row that proves a colour alone draws nothing: same colour asked for,
+  // no underline bit. A terminal showing a line here would be inventing one.
+  let control = cell_at(lab_frame("6", 80, 24), 18, 9)
+
+  buffer.cell_underline_color(control) |> should.equal(style.Indexed(9))
+  style.has(buffer.cell_modifier(control), style.underline())
+  |> should.equal(False)
+}
+
+pub fn the_underline_screen_labels_stay_uncoloured_test() {
+  // The label column is drawn with a different style in the same row, so this
+  // catches a style that leaked across a span boundary.
+  let label = cell_at(lab_frame("6", 80, 24), 0, 6)
+  buffer.cell_underline_color(label) |> should.equal(style.Default)
+}
+
+/// The end of the path, in bytes: what the lab hands the terminal for the
+/// UNDER screen carries the sequences, and the screen that asks for no
+/// underline colour carries none. Cell assertions above stop one step short
+/// of this.
+pub fn the_underline_screen_emits_sgr_58_test() {
+  let under = buffer.to_ansi(lab_frame("6", 80, 24))
+  string.contains(under, "\u{001B}[58;5;9m") |> should.equal(True)
+  string.contains(under, "\u{001B}[58;5;2m") |> should.equal(True)
+
+  let styles = buffer.to_ansi(lab_frame("2", 80, 24))
+  string.contains(styles, "58;") |> should.equal(False)
+}
+
+pub fn the_text_screen_carries_the_squiggle_through_a_reflow_test() {
+  // "rotatting" is underlined in red inside an otherwise plain line. Narrow
+  // the column and it moves, and may split; every cell of it must keep the
+  // colour, because the colour belongs to the word.
+  let squiggle_cells = fn(model: etui_lab.Model) {
+    let #(buf, _, _) = etui_lab.render(model, geometry.rect_new(0, 0, 96, 28))
+    // Only the wrapped column. The screen draws the same line a second time
+    // unwrapped, beside it, which would count the word twice.
+    let column = int.min(model.prose_width, 96 / 2 - 3)
+    indices(28)
+    |> list.flat_map(fn(y) {
+      indices(column)
+      |> list.map(fn(x) { buffer.get_cell(buf, Position(x, y)) })
+    })
+    |> list.filter(fn(c) {
+      style.has(buffer.cell_modifier(c), style.underline())
+      && buffer.cell_underline_color(c) == style.Rgb(220, 60, 60)
+    })
+  }
+
+  let wide = etui_lab.update(backend.KeyPress("5"), etui_lab.initial())
+  let narrow =
+    list.fold(indices(6), wide, fn(m, _) {
+      etui_lab.update(backend.KeyPress("left"), m)
+    })
+
+  // Nine letters, whatever the column width does to where they sit.
+  #("wide", list.length(squiggle_cells(wide))) |> should.equal(#("wide", 9))
+  #("narrow", list.length(squiggle_cells(narrow)))
+  |> should.equal(#("narrow", 9))
 }
 
 pub fn the_text_screen_expands_tabs_test() {

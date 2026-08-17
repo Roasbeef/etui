@@ -284,8 +284,13 @@ type Piece {
   Piece(content: String, style: Span)
 }
 
+// `sep` is the style of the space that preceded this word in the source. The
+// wrapper drops that space at a line break and re-emits it between words on
+// the same row, and it has to come back styled as it was: an unstyled space
+// punches a hole in a highlighted run, and a space that borrows the next
+// word's style draws that word's underline one cell early.
 type Word {
-  Word(pieces: List(Piece))
+  Word(sep: Span, pieces: List(Piece))
 }
 
 fn word_width(w: Word) -> Int {
@@ -297,10 +302,11 @@ fn word_text(w: Word) -> String {
 }
 
 fn tokenise(spans: List(Span), acc: List(Word)) -> List(Word) {
-  let #(words, pending) = tokenise_loop(spans, [], [])
+  let blank = span_plain("")
+  let #(words, pending, pending_sep) = tokenise_loop(spans, [], blank, [])
   let all = case pending {
     [] -> words
-    _ -> [Word(pieces: list.reverse(pending)), ..words]
+    _ -> [Word(sep: pending_sep, pieces: list.reverse(pending)), ..words]
   }
   let _ = acc
   list.reverse(all)
@@ -311,14 +317,22 @@ fn tokenise(spans: List(Span), acc: List(Word)) -> List(Word) {
 fn tokenise_loop(
   spans: List(Span),
   pending: List(Piece),
+  pending_sep: Span,
   done: List(Word),
-) -> #(List(Word), List(Piece)) {
+) -> #(List(Word), List(Piece), Span) {
   case spans {
-    [] -> #(done, pending)
+    [] -> #(done, pending, pending_sep)
     [sp, ..rest] -> {
-      let #(next_pending, next_done) =
-        absorb(string.split(sp.content, " "), sp, pending, done, True)
-      tokenise_loop(rest, next_pending, next_done)
+      let #(next_pending, next_sep, next_done) =
+        absorb(
+          string.split(sp.content, " "),
+          sp,
+          pending,
+          pending_sep,
+          done,
+          True,
+        )
+      tokenise_loop(rest, next_pending, next_sep, next_done)
     }
   }
 }
@@ -327,27 +341,33 @@ fn absorb(
   parts: List(String),
   sp: Span,
   pending: List(Piece),
+  pending_sep: Span,
   done: List(Word),
   first: Bool,
-) -> #(List(Piece), List(Word)) {
+) -> #(List(Piece), Span, List(Word)) {
   case parts {
-    [] -> #(pending, done)
+    [] -> #(pending, pending_sep, done)
     [part, ..rest] -> {
       // Every part after the first was preceded by a space, so it starts a new
-      // word; the first one continues whatever was already being built.
-      let #(carry, closed) = case first {
-        True -> #(pending, done)
+      // word; the first one continues whatever was already being built. That
+      // space came out of `sp`, and the word now starting is the one that has
+      // to carry it back.
+      let #(carry, carry_sep, closed) = case first {
+        True -> #(pending, pending_sep, done)
         False ->
           case pending {
-            [] -> #([], done)
-            _ -> #([], [Word(pieces: list.reverse(pending)), ..done])
+            [] -> #([], sp, done)
+            _ -> #([], sp, [
+              Word(sep: pending_sep, pieces: list.reverse(pending)),
+              ..done
+            ])
           }
       }
       let grown = case part {
         "" -> carry
         _ -> [Piece(content: part, style: sp), ..carry]
       }
-      absorb(rest, sp, grown, closed, False)
+      absorb(rest, sp, grown, carry_sep, closed, False)
     }
   }
 }
@@ -409,7 +429,12 @@ fn pack(
                 "" -> {
                   let #(h2, t2) = split_at_width(flat, width)
                   pack(
-                    [Word(pieces: [Piece(content: t2, style: proto)]), ..rest],
+                    [
+                      Word(sep: w.sep, pieces: [
+                        Piece(content: t2, style: proto),
+                      ]),
+                      ..rest
+                    ],
                     width,
                     alignment,
                     text.cell_width(h2),
@@ -419,13 +444,18 @@ fn pack(
                 }
                 _ ->
                   pack(
-                    [Word(pieces: [Piece(content: tail, style: proto)]), ..rest],
+                    [
+                      Word(sep: w.sep, pieces: [
+                        Piece(content: tail, style: proto),
+                      ]),
+                      ..rest
+                    ],
                     width,
                     alignment,
                     0,
                     [],
                     flush(
-                      push(current, spaced(head, gap), proto),
+                      push(push_gap(current, w.sep, gap), head, proto),
                       alignment,
                       done,
                     ),
@@ -440,21 +470,16 @@ fn pack(
 
 // Push a whole word, piece by piece, so each keeps its own style.
 fn push_word(current: List(Span), w: Word, gap: Int) -> List(Span) {
-  case w.pieces {
-    [] -> current
-    [first, ..rest] ->
-      list.fold(
-        rest,
-        push(current, spaced(first.content, gap), first.style),
-        fn(acc, piece) { push(acc, piece.content, piece.style) },
-      )
-  }
+  let started = push_gap(current, w.sep, gap)
+  list.fold(w.pieces, started, fn(acc, piece) {
+    push(acc, piece.content, piece.style)
+  })
 }
 
-fn spaced(content: String, gap: Int) -> String {
+fn push_gap(current: List(Span), sep: Span, gap: Int) -> List(Span) {
   case gap {
-    0 -> content
-    _ -> " " <> content
+    0 -> current
+    _ -> push(current, " ", sep)
   }
 }
 

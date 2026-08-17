@@ -282,7 +282,7 @@ pub fn empty_cell() -> Cell {
 
 /// Continuation cell (second column of a wide grapheme).
 pub fn continuation_cell(s: style.Style) -> Cell {
-  Cell(content: Continuation, style: s, link: "")
+  Cell(content: Continuation, style: style.resolve(s), link: "")
 }
 
 /// Accessor: OSC 8 hyperlink URI of a cell (empty = no link).
@@ -337,7 +337,12 @@ pub fn get_cell(buffer: Buffer, pos: geometry.Position) -> Cell {
 }
 
 /// Set cell at position. Out-of-bounds writes are ignored.
+///
+/// The cell's style is resolved on the way in, like every other write path,
+/// so a hand-built `Cell` cannot smuggle an unspent `sub_modifier` into the
+/// grid and make an identical-looking cell compare unequal.
 pub fn set_cell(buffer: Buffer, pos: geometry.Position, cell: Cell) -> Buffer {
+  let cell = Cell(..cell, style: style.resolve(cell.style))
   case geometry.contains(buffer.area, pos) {
     True ->
       Buffer(
@@ -729,16 +734,34 @@ fn collect_run(
   }
 }
 
-// Content first, then the style, rather than one `==` on the whole cell.
-// On BEAM the two are equivalent. On JavaScript structural equality walks a
-// record generically, and a Cell now holds a Style rather than three loose
-// fields, so a whole-cell `==` walked one level deeper on every cell and made
-// a full 200x50 repaint 1.7x slower. Comparing the content first settles a
-// repaint on the field that actually differs, and comparing the styles as
-// whole values keeps the identical-reference fast path that a steady frame
-// hits on every cell.
+// The two questions a diff asks, in the order that answers them cheapest.
+//
+// A steady frame compares a cell against itself far more often than against
+// anything else, and identity settles that in a pointer compare. A repaint
+// compares cells that differ, and there the content is what differs, so
+// checking it first avoids walking the style at all. Structural equality
+// alone gets one of the two cases fast and the other slow: `a == b` costs a
+// full 200x50 repaint 1.7x on JavaScript, where it walks a record
+// generically, and splitting it into fields costs the steady frame instead.
 fn cells_equal(a: Cell, b: Cell) -> Bool {
-  a.content == b.content && a.link == b.link && a.style == b.style
+  same_term(a, b)
+  || {
+    a.content == b.content && a.link == b.link && same_style(a.style, b.style)
+  }
+}
+
+// Identity first, structure second. Every cell of a run written by one call
+// shares a single style term, so the pointer compare settles most of them.
+fn same_style(a: style.Style, b: style.Style) -> Bool {
+  same_term(a, b) || a == b
+}
+
+/// True when the two are the same term, false when they merely might be
+/// equal. Never the only test: a false answer means "compare properly".
+@external(erlang, "etui_buffer_array_ffi", "same")
+@external(javascript, "../etui_buffer_array_ffi.mjs", "same")
+fn same_term(a: a, b: a) -> Bool {
+  a == b
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -772,7 +795,7 @@ fn emit_cell(rs: RunStyle, cell: Cell) -> #(String, RunStyle) {
   case is_continuation(cell) {
     True -> #("", rs)
     False -> {
-      let same = cell.link == rs.link && cell.style == rs.style
+      let same = cell.link == rs.link && same_style(cell.style, rs.style)
       case same {
         True -> #(cell_symbol(cell), rs)
         False -> {

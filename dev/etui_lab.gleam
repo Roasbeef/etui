@@ -14,6 +14,8 @@
 ///   2 STYLE    styles that take a modifier away, and the new bits
 ///   3 INPUT    what the parser makes of what you type
 ///   4 SCROLL   viewports that hold still, and clicking on a layout
+///   5 TEXT     wrapping that carries the styles with the words
+///   6 UNDER    an underline in a colour of its own (SGR 58)
 import etui/backend
 import etui/buffer
 import etui/geometry.{
@@ -83,6 +85,7 @@ pub type Screen {
   Input
   Scroll
   Prose
+  Underline
 }
 
 pub type Model {
@@ -157,6 +160,7 @@ fn on_key(key: String, m: Model) -> Model {
     "3", _ -> Model(..m, screen: Input)
     "4", _ -> Model(..m, screen: Scroll)
     "5", _ -> Model(..m, screen: Prose)
+    "6", _ -> Model(..m, screen: Underline)
 
     // TEXT: narrow and widen the wrap column
     "left", Prose -> Model(..m, prose_width: int.max(8, m.prose_width - 2))
@@ -275,6 +279,7 @@ fn chrome(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
         #("3 INPUT", Input),
         #("4 SCROLL", Scroll),
         #("5 TEXT", Prose),
+        #("6 UNDER", Underline),
       ],
       fn(entry) {
         let #(label, which) = entry
@@ -293,7 +298,7 @@ fn chrome(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
   |> line_at(0, 1, w, [tinted(string.repeat("─", w), muted)])
   |> line_at(0, h - 1, w, [
     styled(
-      text.pad_right(" 1-5 screens   TAB cycle   ←/→ adjust   q quit", w),
+      text.pad_right(" 1-6 screens   TAB cycle   ←/→ adjust   q quit", w),
       style.new(muted, bar_bg, style.none()),
     ),
   ])
@@ -547,58 +552,114 @@ fn render_styles(buf: buffer.Buffer, screen: Rect) -> buffer.Buffer {
       )
     })
 
-  let buf =
-    line_at(buf, x, area.position.y + 21, w, [
-      tinted("hidden check  ", muted),
-      plain("["),
-      styled("SECRET", base |> style.add_modifier(style.hidden())),
-      plain("]"),
-      tinted("  the brackets must stay six cells apart", muted),
-    ])
+  line_at(buf, x, area.position.y + 21, w, [
+    tinted("hidden check  ", muted),
+    plain("["),
+    styled("SECRET", base |> style.add_modifier(style.hidden())),
+    plain("]"),
+    tinted("  the brackets must stay six cells apart", muted),
+  ])
+}
 
-  // The underline in a colour of its own. SGR 58 is younger than the rest of
-  // this screen and a good half of terminals ignore it, so the last row is
-  // the control: same colour asked for, no underline turned on, nothing to
-  // see. A terminal that draws all four rows the same is telling you it does
-  // not implement 58 — the sequence column shows etui asked anyway.
+// ─────────────────────────────────────────────────────────────────
+// 6 UNDER
+//
+// SGR 58, the underline in a colour of its own. It is younger than everything
+// on the STYLE screen and a good half of terminals ignore it, so the last
+// sample row is the control: same colour asked for, no underline turned on,
+// nothing to see. A terminal that draws every row the same is telling you it
+// does not implement 58 — the emits column shows etui asked anyway.
+
+fn render_underline(buf: buffer.Buffer, screen: Rect) -> buffer.Buffer {
+  let area = body(screen)
+  let x = area.position.x
+  let w = area.size.width
+  let base = style.default_style()
   let underlined = base |> style.add_modifier(style.underline())
+
   let buf =
     heading(
       buf,
-      rect_new(x, area.position.y + 23, w, 2),
+      area,
       "AN UNDERLINE OF ITS OWN COLOUR",
-      "the text stays its colour, the line under it does not. Needs SGR 58.",
+      "the text keeps its colour, the line under it does not.",
     )
-  let unders = [
-    #("red squiggle", style.Rgb(220, 60, 60), "black text, red line"),
-    #("green", style.Indexed(2), "black text, green line"),
-    #("default", style.Default, "line takes the text colour"),
+  let buf =
+    line_at(buf, x, area.position.y + 3, w, [
+      tinted(text.pad_right("style", 16), style.Indexed(238)),
+      tinted(text.pad_right("sample", 26), style.Indexed(238)),
+      tinted(text.pad_right("emits", 14), style.Indexed(238)),
+      tinted("should look", style.Indexed(238)),
+    ])
+  let rows = [
+    // Indexed rather than Rgb in this table, so the sequence fits its column.
+    // The line below the table asks for a true colour, which is where the
+    // longer form gets exercised.
+    #("red", style.Indexed(9), underlined, "text plain, line red"),
+    #("green", style.Indexed(2), underlined, "text plain, line green"),
+    #(
+      "on cyan text",
+      style.Indexed(9),
+      underlined |> style.with_fg(accent),
+      "text cyan, line still red",
+    ),
+    #(
+      "no underline",
+      style.Indexed(9),
+      base,
+      "PLAIN  <- control, colour alone draws nothing",
+    ),
+    #("default", style.Default, underlined, "line takes the text colour"),
   ]
   let buf =
-    list.index_fold(unders, buf, fn(acc, u, i) {
-      let #(name, colour, expect) = u
+    list.index_fold(rows, buf, fn(acc, row, i) {
+      let #(name, colour, st, expect) = row
       sample_row(
         acc,
         x,
-        area.position.y + 26 + i,
+        area.position.y + 4 + i,
         w,
         name,
-        underlined |> style.with_underline_color(colour),
+        st |> style.with_underline_color(colour),
         "misspellled word",
         expect,
       )
     })
 
-  sample_row(
-    buf,
-    x,
-    area.position.y + 29,
-    w,
-    "no underline",
-    base |> style.with_underline_color(style.Rgb(220, 60, 60)),
-    "misspellled word",
-    "PLAIN  <- control, a colour alone draws nothing",
-  )
+  // The thing the feature is for. The squiggle belongs to the word, so it
+  // moves with it: this is the same line the TEXT screen reflows.
+  let buf =
+    heading(
+      buf,
+      rect_new(x, area.position.y + 11, w, 2),
+      "WHAT IT IS FOR",
+      "one word marked inside a line that is otherwise plain.",
+    )
+  let squiggle =
+    span.span_styled("recieve", underlined)
+    |> span.span_underline_color(style.Rgb(220, 60, 60))
+  let buf =
+    line_at(buf, x, area.position.y + 14, w, [
+      plain("the parser will "),
+      squiggle,
+      plain(" the bytes and "),
+      span.span_styled("seperate", underlined)
+        |> span.span_underline_color(style.Rgb(220, 60, 60)),
+      plain(" them into events."),
+    ])
+
+  line_at(buf, x, area.position.y + 16, w, [
+    tinted(
+      "kitty, VTE, WezTerm and iTerm2 draw the colour. Terminals without SGR 58",
+      muted,
+    ),
+  ])
+  |> line_at(x, area.position.y + 17, w, [
+    tinted(
+      "ignore it and underline in the foreground colour, as before 2.0.",
+      muted,
+    ),
+  ])
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -861,7 +922,17 @@ fn prose() -> span.Text {
         style.default_style()
           |> style.add_modifier(style.underline()),
       ),
-      plain(" filled up while rotating "),
+      plain(" filled up while "),
+      // A word with an underline of its own colour, inside a line that is
+      // otherwise plain. Narrow the column with ← and it splits across rows:
+      // every piece has to keep the red, because the colour belongs to the
+      // word and not to the column the word started in.
+      span.span_styled(
+        "rotatting",
+        style.default_style() |> style.add_modifier(style.underline()),
+      )
+        |> span.span_underline_color(style.Rgb(220, 60, 60)),
+      plain(" "),
       span.span_styled(
         "etui.log",
         style.default_style()
@@ -881,7 +952,7 @@ fn render_prose(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
       buf,
       area,
       "WRAPPING THAT KEEPS THE STYLES",
-      "←/→ changes the column. Colours and underline must follow their words.",
+      "←/→ changes the column. Colours, underline and its own red must follow their words.",
     )
 
   let top = area.position.y + 3
@@ -946,6 +1017,7 @@ pub fn render(m: Model, screen: Rect) -> #(buffer.Buffer, Model, List(Rect)) {
     Input -> render_input(base, m, screen)
     Scroll -> render_scroll(base, m, screen, settled)
     Prose -> render_prose(base, m, screen)
+    Underline -> render_underline(base, screen)
   }
   #(buf, Model(..m, list_state: settled), scroll_panes(body(screen)))
 }

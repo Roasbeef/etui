@@ -9,6 +9,12 @@
 // and `commit` hands back an array again. The draft never escapes the loop
 // that made it, so nothing else can observe the mutation.
 
+// Cheap identity test: true when the two are the same object, false when they
+// merely might be equal. Callers fall back to a structural compare.
+export function same(a, b) {
+  return a === b;
+}
+
 export function make(size, defaultValue) {
   return { data: new Array(size).fill(defaultValue), size, defaultValue };
 }

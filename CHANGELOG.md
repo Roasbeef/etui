@@ -124,6 +124,20 @@ Small, but they will not compile silently:
 - **Status bar sections overwrote each other.** Left, right and centre were
   placed independently, so a narrow bar rendered them on top of one another.
   They now get disjoint spans and truncate instead.
+- **Diffing a steady frame got cheaper on JavaScript, not more expensive.**
+  A cell is compared against itself far more often than against anything else,
+  and identity settles that in a pointer compare; the structural walk is left
+  for cells that might actually differ. An unchanged 200x50 frame diffs in
+  54 us where it took 124 us in 1.0, and a full repaint in 4.0 ms where it
+  took 6.9 ms.
+- **The space between two wrapped words took the style of the word after it.**
+  The styled wrapper drops the separating space at a line break and re-emits it
+  between words that share a row; it re-emitted it with the following word's
+  style. Nothing noticed while styles were colours on glyphs, because a space
+  has no glyph to colour, but an underline does paint a space, so the line
+  under a marked word started one cell early. The space now carries the style
+  of the span it came from, which also keeps a highlighted phrase whole rather
+  than punching a hole where each space was.
 - **Wrapping was quadratic in the length of a line.** `text.wrap` measured and
   rebuilt the line it was assembling on every word, which made it five times
   slower than the styled wrapper that does strictly more work.

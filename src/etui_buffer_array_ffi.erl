@@ -1,6 +1,6 @@
 -module(etui_buffer_array_ffi).
 -export([new/2, get/2, set/3, fill_string/6, fill_all_rows/6,
-         draft/1, draft_set/3, draft_get/2, commit/1]).
+         draft/1, draft_set/3, draft_get/2, commit/1, same/2]).
 -on_load(init_module/0).
 
 %% Pre-allocate {content, <<B>>, 1} tuples for all 256 bytes on module load.
@@ -14,6 +14,12 @@ init_module() ->
 %% Fixed-size array with a default value for unset indices.
 %% Erlang `array` is a sparse persistent trie; get/set are O(log10 N)
 %% with tiny constants, much cheaper than dict for integer-keyed dense data.
+
+%% Cheap identity test: true when the two are the same physical term, false
+%% when they merely might be equal. Callers fall back to a structural compare.
+%% erts_debug:same/2 is the pointer comparison; =:= would walk two equal-but-
+%% distinct terms in full, which is the work this call exists to avoid.
+same(A, B) -> erts_debug:same(A, B).
 
 new(Size, Default) ->
     array:new(Size, [{default, Default}]).

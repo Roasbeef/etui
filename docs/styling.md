@@ -77,6 +77,13 @@ let squiggle =
   |> style.with_underline_color(style.Rgb(220, 60, 60))
 ```
 
+On a span, where a single marked word usually lives:
+
+```gleam
+span.span_styled("recieve", style.underline_style())
+|> span.span_underline_color(style.Rgb(220, 60, 60))
+```
+
 This emits SGR 58. Terminals that implement it (kitty, VTE, WezTerm, iTerm2)
 draw the underline in that colour; the rest ignore the sequence and draw it in
 the foreground colour, as they did before 2.0.

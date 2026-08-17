@@ -214,3 +214,236 @@ pub fn span_carries_underline_color_to_the_buffer_test() {
   |> buffer.cell_underline_color
   |> should.equal(style.Default)
 }
+
+// ─────────────────────────────────────────────────────────────────
+// The two fill implementations
+//
+// Erlang fills through a native module and JavaScript through the Gleam
+// fallback, so every property below has to be asserted rather than inferred
+// from the other target. Wide graphemes go through the branch that writes two
+// cells, which is where a style is easiest to drop.
+
+pub fn wide_grapheme_continuation_carries_the_style_test() {
+  let s =
+    style.new(style.Indexed(4), style.Default, style.underline())
+    |> style.with_underline_color(style.Indexed(9))
+  let buf =
+    buffer.buffer_new(rect(4, 1))
+    |> buffer.set_string(Position(0, 0), "漢", s)
+
+  let lead = buffer.get_cell(buf, Position(0, 0))
+  let trail = buffer.get_cell(buf, Position(1, 0))
+
+  buffer.is_continuation(trail) |> should.equal(True)
+  // The trailing half is never drawn on its own, but it is compared: a
+  // continuation that kept a different style would repaint every frame.
+  buffer.cell_style(trail) |> should.equal(buffer.cell_style(lead))
+  buffer.cell_underline_color(trail) |> should.equal(style.Indexed(9))
+}
+
+pub fn filled_buffer_carries_the_underline_color_test() {
+  let s =
+    style.new(style.Default, style.Default, style.underline())
+    |> style.with_underline_color(style.Rgb(1, 2, 3))
+  let buf = buffer.buffer_new_filled(rect(3, 2), "ab", s)
+
+  buffer.get_cell(buf, Position(0, 1))
+  |> buffer.cell_underline_color
+  |> should.equal(style.Rgb(1, 2, 3))
+}
+
+/// The bulk path pads short rows with blank cells. A blank must not inherit
+/// the underline colour of the text beside it, or the squiggle runs to the
+/// end of the row.
+pub fn filled_buffer_padding_stays_default_test() {
+  let s =
+    style.new(style.Default, style.Default, style.underline())
+    |> style.with_underline_color(style.Rgb(1, 2, 3))
+  let buf = buffer.buffer_new_filled(rect(4, 1), "ab", s)
+
+  buffer.get_cell(buf, Position(3, 0))
+  |> buffer.cell_underline_color
+  |> should.equal(style.Default)
+}
+
+pub fn blit_carries_the_underline_color_test() {
+  let s =
+    style.new(style.Default, style.Default, style.underline())
+    |> style.with_underline_color(style.Indexed(5))
+  let src =
+    buffer.buffer_new(rect(2, 1))
+    |> buffer.set_string(Position(0, 0), "ab", s)
+  let dst =
+    buffer.buffer_new(rect(4, 1))
+    |> buffer.blit(src, rect(2, 1), Position(2, 0))
+
+  buffer.get_cell(dst, Position(2, 0))
+  |> buffer.cell_underline_color
+  |> should.equal(style.Indexed(5))
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Resolution at every door
+//
+// A cell holds a settled style wherever it entered from, not only through
+// `set_string`.
+
+pub fn set_cell_resolves_test() {
+  let s =
+    style.new(style.Default, style.Default, style.bold())
+    |> style.remove_modifier(style.bold())
+  let cell = buffer.Cell(content: buffer.Content("x", 1), style: s, link: "")
+
+  let stored =
+    buffer.buffer_new(rect(1, 1))
+    |> buffer.set_cell(Position(0, 0), cell)
+    |> buffer.get_cell(Position(0, 0))
+    |> buffer.cell_style
+
+  style.has(stored.modifier, style.bold()) |> should.equal(False)
+  style.is_none(stored.sub_modifier) |> should.equal(True)
+}
+
+pub fn continuation_cell_resolves_test() {
+  let s =
+    style.new(style.Default, style.Default, style.bold())
+    |> style.remove_modifier(style.bold())
+  let stored = buffer.cell_style(buffer.continuation_cell(s))
+
+  style.has(stored.modifier, style.bold()) |> should.equal(False)
+  style.is_none(stored.sub_modifier) |> should.equal(True)
+}
+
+/// A hand-built cell and a written one must be interchangeable, or a widget
+/// that composes cells directly would repaint rows that did not change.
+pub fn a_hand_built_cell_equals_a_written_one_test() {
+  let s = style.new(style.Indexed(2), style.Default, style.underline())
+  let written =
+    buffer.buffer_new(rect(1, 1))
+    |> buffer.set_string(Position(0, 0), "x", s)
+  let built =
+    buffer.buffer_new(rect(1, 1))
+    |> buffer.set_cell(
+      Position(0, 0),
+      buffer.Cell(content: buffer.Content("x", 1), style: s, link: ""),
+    )
+
+  buffer.diff(written, built) |> should.equal([])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// What the terminal receives
+
+/// Dropping the colour must clear it. Without the reset the next word keeps
+/// the squiggle of the misspelled one before it.
+pub fn leaving_a_colored_underline_resets_test() {
+  let coloured =
+    style.new(style.Default, style.Default, style.underline())
+    |> style.with_underline_color(style.Indexed(9))
+  let out =
+    buffer.buffer_new(rect(4, 1))
+    |> buffer.set_string(Position(0, 0), "ab", coloured)
+    |> buffer.set_string(Position(2, 0), "cd", style.default_style())
+    |> buffer.to_ansi
+
+  string.contains(out, "\u{001B}[58;5;9m") |> should.equal(True)
+  string.contains(out, style.ansi_reset()) |> should.equal(True)
+}
+
+pub fn adjacent_colors_both_appear_test() {
+  let base = style.new(style.Default, style.Default, style.underline())
+  let out =
+    buffer.buffer_new(rect(4, 1))
+    |> buffer.set_string(
+      Position(0, 0),
+      "ab",
+      style.with_underline_color(base, style.Indexed(1)),
+    )
+    |> buffer.set_string(
+      Position(2, 0),
+      "cd",
+      style.with_underline_color(base, style.Indexed(2)),
+    )
+    |> buffer.to_ansi
+
+  string.contains(out, "\u{001B}[58;5;1m") |> should.equal(True)
+  string.contains(out, "\u{001B}[58;5;2m") |> should.equal(True)
+}
+
+/// A hyperlink and a coloured underline on the same cell: both sequences, and
+/// the link is opened after the style so the reset cannot swallow it.
+pub fn link_and_underline_color_coexist_test() {
+  let s =
+    style.new(style.Default, style.Default, style.underline())
+    |> style.with_underline_color(style.Indexed(4))
+  let out =
+    buffer.buffer_new(rect(4, 1))
+    |> buffer.set_string_linked(Position(0, 0), "docs", s, "https://gleam.run")
+    |> buffer.to_ansi
+
+  string.contains(out, "\u{001B}[58;5;4m") |> should.equal(True)
+  string.contains(out, "https://gleam.run") |> should.equal(True)
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Wrapping
+
+/// Wrapping cuts spans. Each piece keeps the colour of the span it came from,
+/// which is the whole reason a squiggle survives a reflow.
+pub fn wrapping_keeps_the_underline_color_test() {
+  let squiggle =
+    span.span_styled("supercalifragilistic", style.underline_style())
+    |> span.span_underline_color(style.Rgb(220, 60, 60))
+  let wrapped = span.wrap(span.text_new([span.line_new([squiggle])]), 8)
+
+  let colours =
+    list.flat_map(wrapped.lines, fn(l) {
+      list.map(l.spans, fn(sp) { sp.style.underline_color })
+    })
+
+  list.all(colours, fn(c) { c == style.Rgb(220, 60, 60) })
+  |> should.equal(True)
+  { list.length(colours) > 1 } |> should.equal(True)
+}
+
+/// Nothing shared: two styles built separately, two buffers filled
+/// separately. The identity shortcut in the diff cannot answer this one, so
+/// this is the test that fails if the structural fallback behind it breaks.
+pub fn separately_built_equal_cells_still_compare_equal_test() {
+  let a =
+    buffer.buffer_new(rect(3, 1))
+    |> buffer.set_string(
+      Position(0, 0),
+      "abc",
+      style.new(style.Indexed(2), style.Indexed(0), style.underline())
+        |> style.with_underline_color(style.Rgb(9, 9, 9)),
+    )
+  let b =
+    buffer.buffer_new(rect(3, 1))
+    |> buffer.set_string(
+      Position(0, 0),
+      "abc",
+      style.new(style.Indexed(2), style.Indexed(0), style.underline())
+        |> style.with_underline_color(style.Rgb(9, 9, 9)),
+    )
+
+  buffer.diff(a, b) |> should.equal([])
+}
+
+/// And the mirror: one field apart, still a repaint. An identity check that
+/// answered "equal" too eagerly would show up here.
+pub fn one_field_apart_is_not_equal_test() {
+  let base = style.new(style.Indexed(2), style.Indexed(0), style.underline())
+  let a =
+    buffer.buffer_new(rect(3, 1))
+    |> buffer.set_string(Position(0, 0), "abc", base)
+  let b =
+    buffer.buffer_new(rect(3, 1))
+    |> buffer.set_string(
+      Position(0, 0),
+      "abc",
+      style.with_underline_color(base, style.Rgb(9, 9, 9)),
+    )
+
+  buffer.diff(a, b) |> list.length |> should.equal(1)
+}
