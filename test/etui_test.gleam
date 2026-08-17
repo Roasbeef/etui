@@ -838,13 +838,7 @@ pub fn list_scroll_into_view_up_test() {
 
 pub fn list_highlight_style_test() {
   let items = ["Item 1", "Item 2"]
-  let s =
-    style.Style(
-      fg: style.Default,
-      bg: style.Default,
-      modifier: style.bold(),
-      sub_modifier: style.none(),
-    )
+  let s = style.new(style.Default, style.Default, style.bold())
   let l =
     glist_widget.list_new(items)
     |> glist_widget.with_highlight_style(s)
@@ -859,6 +853,7 @@ pub fn table_highlight_style_test() {
       bg: style.Default,
       modifier: style.add(style.bold(), style.reverse()),
       sub_modifier: style.none(),
+      underline_color: style.Default,
     )
   let t =
     gtable_widget.table_new(rows)
@@ -896,20 +891,8 @@ pub fn style_reversed_test() {
 }
 
 pub fn style_patch_test() {
-  let base =
-    style.Style(
-      fg: style.Indexed(1),
-      bg: style.Indexed(2),
-      modifier: style.bold(),
-      sub_modifier: style.none(),
-    )
-  let over =
-    style.Style(
-      fg: style.Default,
-      bg: style.Indexed(3),
-      modifier: style.none(),
-      sub_modifier: style.none(),
-    )
+  let base = style.new(style.Indexed(1), style.Indexed(2), style.bold())
+  let over = style.new(style.Default, style.Indexed(3), style.none())
   let result = style.patch(base, over)
   result.fg |> should.equal(style.Indexed(1))
   result.bg |> should.equal(style.Indexed(3))
@@ -2030,9 +2013,7 @@ pub fn diff_single_cell_change_test() {
       prev,
       Position(1, 0),
       "X",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let ops = buffer.diff(prev, next)
   list.length(ops) |> should.equal(1)
@@ -2046,9 +2027,7 @@ pub fn diff_returns_patch_at_change_position_test() {
       prev,
       Position(2, 0),
       "AB",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let ops = buffer.diff(prev, next)
   case ops {
@@ -2065,16 +2044,12 @@ pub fn diff_multi_row_change_test() {
     |> buffer.set_string(
       Position(0, 0),
       "row0",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
     |> buffer.set_string(
       Position(0, 2),
       "row2",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let ops = buffer.diff(prev, next)
   // At least one patch per changed row
@@ -2091,18 +2066,14 @@ pub fn diff_same_text_no_op_test() {
       buffer.buffer_new(area),
       Position(0, 0),
       "hi",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let next =
     buffer.set_string(
       buffer.buffer_new(area),
       Position(0, 0),
       "hi",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   buffer.diff(prev, next) |> should.equal([])
 }
@@ -2217,9 +2188,7 @@ pub fn to_ansi_nonempty_test() {
     |> buffer.set_string(
       Position(x: 0, y: 0),
       "abc",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let result = buffer.to_ansi(buf)
   result |> string.contains("abc") |> should.equal(True)
@@ -2232,9 +2201,7 @@ pub fn diff_to_ansi_identical_buffers_test() {
     |> buffer.set_string(
       Position(x: 0, y: 0),
       "abc",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   buffer.diff_to_ansi(buf, buf) |> should.equal("")
 }
@@ -2246,18 +2213,14 @@ pub fn diff_to_ansi_single_change_test() {
     |> buffer.set_string(
       Position(x: 0, y: 0),
       "abc",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let curr =
     buffer.buffer_new(area)
     |> buffer.set_string(
       Position(x: 0, y: 0),
       "axc",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let result = buffer.diff_to_ansi(prev, curr)
   result |> string.contains("x") |> should.equal(True)
@@ -2342,6 +2305,7 @@ pub fn style_remove_modifier_test() {
       bg: style.Default,
       modifier: style.add(style.bold(), style.italic()),
       sub_modifier: style.none(),
+      underline_color: style.Default,
     )
     |> style.remove_modifier(style.bold())
   style.has(s.modifier, style.bold()) |> should.equal(False)
@@ -2416,11 +2380,13 @@ pub fn geometry_percent_rect_test() {
 // span additions
 
 pub fn span_bold_italic_dim_test() {
-  style.has(span.span_bold("x").modifier, style.bold()) |> should.equal(True)
-  style.has(span.span_italic("x").modifier, style.italic())
+  style.has(span.span_bold("x").style.modifier, style.bold())
   |> should.equal(True)
-  style.has(span.span_dim("x").modifier, style.dim()) |> should.equal(True)
-  style.has(span.span_underline("x").modifier, style.underline())
+  style.has(span.span_italic("x").style.modifier, style.italic())
+  |> should.equal(True)
+  style.has(span.span_dim("x").style.modifier, style.dim())
+  |> should.equal(True)
+  style.has(span.span_underline("x").style.modifier, style.underline())
   |> should.equal(True)
 }
 
@@ -2763,16 +2729,12 @@ pub fn scroll_view_render_blits_content_test() {
         inner_buf,
         geometry.Position(x: 0, y: 0),
         "Hello",
-        style.Default,
-        style.Default,
-        style.none(),
+        style.new(style.Default, style.Default, style.none()),
       )
       |> buffer.set_string(
         geometry.Position(x: 0, y: 1),
         "World",
-        style.Default,
-        style.Default,
-        style.none(),
+        style.new(style.Default, style.Default, style.none()),
       )
     })
   buffer.width(result) |> should.equal(5)

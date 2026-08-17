@@ -344,9 +344,7 @@ fn render(state: AppState, screen: Rect) -> buffer.Buffer {
     buf,
     Position(0, h - 1),
     make_status(state, w),
-    style.Default,
-    style.Default,
-    style.reverse(),
+    style.new(style.Default, style.Default, style.reverse()),
   )
 }
 
@@ -414,9 +412,7 @@ fn page_lista(
       buf,
       Position(rx, area.position.y),
       text.pad_right("SPARKLINE WIDGET  (5 varianti fill)", rw),
-      style.Default,
-      style.Default,
-      style.bold(),
+      style.new(style.Default, style.Default, style.bold()),
     )
   let wave = fn(phase) {
     range(0, rw)
@@ -467,9 +463,7 @@ fn page_lista(
         b2,
         Position(rx, area.position.y + dy + 1),
         label,
-        style.Rgb(150, 150, 150),
-        style.Default,
-        style.none(),
+        style.new(style.Rgb(150, 150, 150), style.Default, style.none()),
       )
     })
 
@@ -479,9 +473,7 @@ fn page_lista(
       buf,
       Position(rx, area.position.y + 17),
       text.pad_right("SPINNER WIDGET  (4 stili)", rw),
-      style.Default,
-      style.Default,
-      style.bold(),
+      style.new(style.Default, style.Default, style.bold()),
     )
   let spinner_row = area.position.y + 18
   let sp_col = int.max(18, rw / 2)
@@ -512,9 +504,7 @@ fn page_lista(
     buf,
     Position(rx, area.position.y + ch - 1),
     bl <> "  b=toggle  frame=" <> int.to_string(state.anim.frame),
-    style.Default,
-    style.Default,
-    style.dim(),
+    style.new(style.Default, style.Default, style.dim()),
   )
 }
 
@@ -583,9 +573,7 @@ fn page_tabella(
       buf,
       Position(rx, area.position.y),
       text.pad_right("TABLE API", rw),
-      style.Default,
-      style.Default,
-      style.bold(),
+      style.new(style.Default, style.Default, style.bold()),
     )
   let api_lines = [
     "table_new(rows) → TableWidget",
@@ -610,9 +598,7 @@ fn page_tabella(
         b,
         Position(rx, area.position.y + 2 + i),
         line,
-        style.Rgb(180, 220, 255),
-        style.Default,
-        style.none(),
+        style.new(style.Rgb(180, 220, 255), style.Default, style.none()),
       )
     })
   let bl = case state.blink_table {
@@ -623,9 +609,7 @@ fn page_tabella(
     buf,
     Position(rx, area.position.y + ch - 1),
     bl <> "  b=toggle  row=" <> int.to_string(state.table_state.selected_row),
-    style.Default,
-    style.Default,
-    style.dim(),
+    style.new(style.Default, style.Default, style.dim()),
   )
 }
 
@@ -672,27 +656,21 @@ fn page_ricerca(
       buf,
       Position(ix, area.position.y + 5),
       "valore:  " <> display,
-      style.Rgb(180, 255, 180),
-      style.Default,
-      style.none(),
+      style.new(style.Rgb(180, 255, 180), style.Default, style.none()),
     )
   let buf =
     buffer.set_string(
       buf,
       Position(ix, area.position.y + 6),
       "cursore: " <> int.to_string(state.input_state.cursor),
-      style.Rgb(180, 255, 180),
-      style.Default,
-      style.none(),
+      style.new(style.Rgb(180, 255, 180), style.Default, style.none()),
     )
   let buf =
     buffer.set_string(
       buf,
       Position(ix, area.position.y + 7),
       "lunghezza: " <> int.to_string(text.cell_width(val)),
-      style.Rgb(180, 255, 180),
-      style.Default,
-      style.none(),
+      style.new(style.Rgb(180, 255, 180), style.Default, style.none()),
     )
 
   // API reference
@@ -701,9 +679,7 @@ fn page_ricerca(
       buf,
       Position(area.position.x, area.position.y + 9),
       text.pad_right("INPUT API", w),
-      style.Default,
-      style.Default,
-      style.bold(),
+      style.new(style.Default, style.Default, style.bold()),
     )
   let api_lines = [
     "input_new(placeholder) → InputWidget",
@@ -726,18 +702,14 @@ fn page_ricerca(
         b,
         Position(area.position.x + 2, area.position.y + 11 + i),
         line,
-        style.Rgb(180, 220, 255),
-        style.Default,
-        style.none(),
+        style.new(style.Rgb(180, 220, 255), style.Default, style.none()),
       )
     })
   buffer.set_string(
     buf,
     Position(area.position.x, area.position.y + ch - 1),
     "digita=inserisci  ⌫=cancella  TAB=pagina successiva",
-    style.Default,
-    style.Default,
-    style.dim(),
+    style.new(style.Default, style.Default, style.dim()),
   )
 }
 
@@ -792,9 +764,7 @@ fn page_cursori(
           b,
           Position(area.position.x + 2, ry),
           row_text,
-          style.Default,
-          style.Default,
-          row_mod,
+          style.new(style.Default, style.Default, row_mod),
         )
       // Preview char at right edge with actual blink modifier
       let prev_fg = case is_sel {
@@ -805,9 +775,7 @@ fn page_cursori(
         b2,
         Position(area.position.x + lw - 2, ry),
         cursor_shape_preview(idx),
-        prev_fg,
-        style.Default,
-        preview_mod,
+        style.new(prev_fg, style.Default, preview_mod),
       )
     })
 
@@ -828,63 +796,49 @@ fn page_cursori(
       buf,
       Position(rx + 2, area.position.y + 2),
       "Forma attiva:",
-      style.Default,
-      style.Default,
-      style.dim(),
+      style.new(style.Default, style.Default, style.dim()),
     )
   let buf =
     buffer.set_string(
       buf,
       Position(rx + 2, area.position.y + 3),
       cur_name,
-      style.Rgb(255, 220, 0),
-      style.Default,
-      style.bold(),
+      style.new(style.Rgb(255, 220, 0), style.Default, style.bold()),
     )
   let buf =
     buffer.set_string(
       buf,
       Position(rx + 2, area.position.y + 4),
       "DECSCUSR: " <> cur_code,
-      style.Rgb(180, 255, 180),
-      style.Default,
-      style.none(),
+      style.new(style.Rgb(180, 255, 180), style.Default, style.none()),
     )
   let buf =
     buffer.set_string(
       buf,
       Position(rx + 2, area.position.y + 6),
       "Il cursore del terminale è posizionato",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let buf =
     buffer.set_string(
       buf,
       Position(rx + 2, area.position.y + 7),
       "nella lista a sinistra ← sulla riga",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let buf =
     buffer.set_string(
       buf,
       Position(rx + 2, area.position.y + 8),
       "selezionata. Cambia forma con ↑↓.",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let buf =
     buffer.set_string(
       buf,
       Position(rx + 2, area.position.y + 10),
       "CURSOR API:",
-      style.Default,
-      style.Default,
-      style.bold(),
+      style.new(style.Default, style.Default, style.bold()),
     )
   let api = [
     "set_shape(shape) → String",
@@ -902,18 +856,14 @@ fn page_cursori(
         b,
         Position(rx + 2, area.position.y + 11 + i),
         line,
-        style.Rgb(180, 220, 255),
-        style.Default,
-        style.none(),
+        style.new(style.Rgb(180, 220, 255), style.Default, style.none()),
       )
     })
   buffer.set_string(
     buf,
     Position(rx + 2, area.position.y + ch - 2),
     "↑↓=seleziona  TAB=pagina successiva",
-    style.Default,
-    style.Default,
-    style.dim(),
+    style.new(style.Default, style.Default, style.dim()),
   )
 }
 
@@ -941,9 +891,7 @@ fn page_progress(
         "PROGRESS + GRADIENT BAR  valore: " <> pct_str <> "  ↑↓=±10  ←→=±1",
         w,
       ),
-      style.Rgb(255, 220, 0),
-      style.Default,
-      style.bold(),
+      style.new(style.Rgb(255, 220, 0), style.Default, style.bold()),
     )
 
   // PROGRESS WIDGET section
@@ -952,9 +900,7 @@ fn page_progress(
       buf,
       Position(area.position.x, area.position.y + 2),
       "── progress widget ──",
-      style.Default,
-      style.Default,
-      style.dim(),
+      style.new(style.Default, style.Default, style.dim()),
     )
   let prog_rows = [
     #("progress_new", fn(b, y) {
@@ -995,9 +941,7 @@ fn page_progress(
           b,
           Position(area.position.x, y),
           text.pad_right(label, lab_w),
-          style.Rgb(180, 220, 255),
-          style.Default,
-          style.none(),
+          style.new(style.Rgb(180, 220, 255), style.Default, style.none()),
         )
       render_fn(b2, y)
     })
@@ -1008,9 +952,7 @@ fn page_progress(
       buf,
       Position(area.position.x, area.position.y + 7),
       "── gradient_bar widget ──",
-      style.Default,
-      style.Default,
-      style.dim(),
+      style.new(style.Default, style.Default, style.dim()),
     )
   let grad_stops = [
     style.Rgb(0, 100, 220),
@@ -1104,9 +1046,7 @@ fn page_progress(
           b,
           Position(area.position.x, y),
           text.pad_right(label, lab_w),
-          style.Rgb(180, 220, 255),
-          style.Default,
-          style.none(),
+          style.new(style.Rgb(180, 220, 255), style.Default, style.none()),
         )
       render_fn(b2, y)
     })
@@ -1118,9 +1058,7 @@ fn page_progress(
       "↑↓=±10  ←→=±1  valore=" <> pct_str <> "  TAB=pagina successiva",
       w,
     ),
-    style.Default,
-    style.Default,
-    style.dim(),
+    style.new(style.Default, style.Default, style.dim()),
   )
 }
 
@@ -1148,18 +1086,14 @@ fn page_gauge(
         "GAUGE WIDGET  valore: " <> pct_str <> "  ↑↓=±10  ←→=±1",
         w,
       ),
-      style.Rgb(255, 220, 0),
-      style.Default,
-      style.bold(),
+      style.new(style.Rgb(255, 220, 0), style.Default, style.bold()),
     )
   let buf =
     buffer.set_string(
       buf,
       Position(area.position.x, area.position.y + 1),
       text.pad_right("──────────────────────────────────", w),
-      style.Default,
-      style.Default,
-      style.dim(),
+      style.new(style.Default, style.Default, style.dim()),
     )
 
   let gauge_rows = [
@@ -1267,9 +1201,7 @@ fn page_gauge(
               b,
               Position(area.position.x, y),
               text.pad_right(label, lab_w),
-              style.Rgb(180, 220, 255),
-              style.Default,
-              style.none(),
+              style.new(style.Rgb(180, 220, 255), style.Default, style.none()),
             )
           render_fn(b2, y)
         }
@@ -1283,9 +1215,7 @@ fn page_gauge(
       "↑↓=±10  ←→=±1  valore=" <> pct_str <> "  TAB=pagina successiva",
       w,
     ),
-    style.Default,
-    style.Default,
-    style.dim(),
+    style.new(style.Default, style.Default, style.dim()),
   )
 }
 
@@ -1333,9 +1263,7 @@ fn page_chart(
         "CHART  fill: " <> chart_fill_name(state.chart_fill_idx),
         chart_w,
       ),
-      style.Rgb(255, 220, 0),
-      style.Default,
-      style.bold(),
+      style.new(style.Rgb(255, 220, 0), style.Default, style.bold()),
     )
 
   // Info panel (right)
@@ -1360,9 +1288,7 @@ fn page_chart(
       buf,
       Position(ix + 1, area.position.y + 2),
       "ChartFill varianti:",
-      style.Default,
-      style.Default,
-      style.bold(),
+      style.new(style.Default, style.Default, style.bold()),
     )
   let buf =
     list.index_fold(fill_names, buf, fn(b, name, i) {
@@ -1379,9 +1305,7 @@ fn page_chart(
         b,
         Position(ix + 1, area.position.y + 3 + i),
         text.pad_right(name, info_w - 2),
-        fg,
-        style.Default,
-        mod,
+        style.new(fg, style.Default, mod),
       )
     })
   let api = [
@@ -1402,18 +1326,14 @@ fn page_chart(
         b,
         Position(ix + 1, area.position.y + 9 + i),
         line,
-        style.Rgb(180, 220, 255),
-        style.Default,
-        style.none(),
+        style.new(style.Rgb(180, 220, 255), style.Default, style.none()),
       )
     })
   buffer.set_string(
     buf,
     Position(ix + 1, area.position.y + ch - 2),
     "↑↓=cambia fill",
-    style.Default,
-    style.Default,
-    style.dim(),
+    style.new(style.Default, style.Default, style.dim()),
   )
 }
 
@@ -1468,9 +1388,7 @@ fn page_animazioni(
       buf,
       Position(area.position.x, area.position.y),
       text.pad_right("MARQUEE WIDGET  (3 varianti)", w),
-      style.Default,
-      style.Default,
-      style.bold(),
+      style.new(style.Default, style.Default, style.bold()),
     )
   let marquee_text =
     "etui ✦ sparkline ✦ marquee ✦ gradient ✦ rainbow ✦ pulse ✦ progress ✦ spinner ✦ cursori ✦ liste ✦ tabelle ✦ input"
@@ -1523,9 +1441,7 @@ fn page_animazioni(
       buf,
       Position(area.position.x, area.position.y + 5),
       text.pad_right("GRADIENT BAR  (full width, animati)", w),
-      style.Default,
-      style.Default,
-      style.bold(),
+      style.new(style.Default, style.Default, style.bold()),
     )
   let grad_stops = [
     style.Rgb(0, 100, 220),
@@ -1599,9 +1515,7 @@ fn page_animazioni(
             b2,
             Position(area.position.x, base_y + 1),
             label,
-            style.Rgb(150, 150, 150),
-            style.Default,
-            style.none(),
+            style.new(style.Rgb(150, 150, 150), style.Default, style.none()),
           )
         }
       }
@@ -1614,9 +1528,7 @@ fn page_animazioni(
       buf,
       Position(area.position.x, mod_y),
       text.pad_right("STYLE MODIFIERS", w),
-      style.Default,
-      style.Default,
-      style.bold(),
+      style.new(style.Default, style.Default, style.bold()),
     )
   let mod_demos = [
     #("Normal", style.none()),
@@ -1634,9 +1546,7 @@ fn page_animazioni(
         b,
         Position(area.position.x + i * 12, mod_y + 1),
         " " <> label <> " ",
-        style.Default,
-        style.Default,
-        mod,
+        style.new(style.Default, style.Default, mod),
       )
     })
 
@@ -1649,9 +1559,7 @@ fn page_animazioni(
         <> "  TAB=pagina successiva  q=quit",
       w,
     ),
-    style.Default,
-    style.Default,
-    style.dim(),
+    style.new(style.Default, style.Default, style.dim()),
   )
 }
 
@@ -1670,9 +1578,7 @@ fn page_hbar(buf: buffer.Buffer, area: Rect, state: AppState) -> buffer.Buffer {
       buf,
       Position(area.position.x, area.position.y),
       text.pad_right("HBAR WIDGET  (4 varianti fill)", chart_w),
-      style.Rgb(255, 220, 0),
-      style.Default,
-      style.bold(),
+      style.new(style.Rgb(255, 220, 0), style.Default, style.bold()),
     )
 
   // Dynamic data per panel (different phase so bars move differently)
@@ -1753,9 +1659,7 @@ fn page_hbar(buf: buffer.Buffer, area: Rect, state: AppState) -> buffer.Buffer {
               b,
               Position(area.position.x, y),
               label,
-              style.Rgb(180, 220, 255),
-              style.Default,
-              style.dim(),
+              style.new(style.Rgb(180, 220, 255), style.Default, style.dim()),
             )
           render_fn(b2, y + 1, int.max(1, h))
         }
@@ -1796,9 +1700,7 @@ fn page_hbar(buf: buffer.Buffer, area: Rect, state: AppState) -> buffer.Buffer {
       b,
       Position(ix + 1, area.position.y + 2 + i),
       line,
-      style.Rgb(180, 220, 255),
-      style.Default,
-      style.none(),
+      style.new(style.Rgb(180, 220, 255), style.Default, style.none()),
     )
   })
 }
@@ -1854,9 +1756,7 @@ fn page_canvas(
           <> " pixel",
         canvas_w,
       ),
-      style.Rgb(255, 220, 0),
-      style.Default,
-      style.bold(),
+      style.new(style.Rgb(255, 220, 0), style.Default, style.bold()),
     )
 
   let buf =
@@ -1910,9 +1810,7 @@ fn page_canvas(
           b,
           Position(ix + 1, area.position.y + 2 + i),
           line,
-          style.Rgb(180, 220, 255),
-          style.Default,
-          style.none(),
+          style.new(style.Rgb(180, 220, 255), style.Default, style.none()),
         )
     }
   })
@@ -1946,18 +1844,14 @@ fn page_scene(
           <> "px",
         solar_w,
       ),
-      style.Rgb(255, 220, 0),
-      style.Default,
-      style.bold(),
+      style.new(style.Rgb(255, 220, 0), style.Default, style.bold()),
     )
   let buf =
     buffer.set_string(
       buf,
       Position(mx, area.position.y),
       text.pad_right("MANDELBROT  iter=20", mandel_w),
-      style.Rgb(180, 220, 255),
-      style.Default,
-      style.bold(),
+      style.new(style.Rgb(180, 220, 255), style.Default, style.bold()),
     )
 
   // Solar system canvas

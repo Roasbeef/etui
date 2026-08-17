@@ -244,9 +244,7 @@ pub fn diff_one_cell_changed_test() {
       Position(x: 2, y: 0),
       buffer.Cell(
         content: buffer.Content(symbol: "X", width: 1),
-        fg: style.Default,
-        bg: style.Default,
-        modifier: style.none(),
+        style: style.new(style.Default, style.Default, style.none()),
         link: "",
       ),
     )
@@ -270,9 +268,7 @@ pub fn diff_full_row_changed_test() {
       prev,
       Position(x: 0, y: 0),
       "abcd",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let ops = buffer.diff(prev, next)
   // All 4 cells on row 0 changed and adjacent → 1 op
@@ -295,23 +291,17 @@ pub fn diff_full_screen_changed_test() {
       prev,
       Position(x: 0, y: 0),
       "abcd",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
     |> buffer.set_string(
       Position(x: 0, y: 1),
       "efgh",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
     |> buffer.set_string(
       Position(x: 0, y: 2),
       "ijkl",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let ops = buffer.diff(prev, next)
   // 3 rows changed → 3 patches
@@ -353,16 +343,12 @@ pub fn clear_erases_filled_area_test() {
   |> buffer.set_string(
     Position(x: 0, y: 0),
     "hello",
-    style.Default,
-    style.Default,
-    style.none(),
+    style.new(style.Default, style.Default, style.none()),
   )
   |> buffer.set_string(
     Position(x: 0, y: 1),
     "world",
-    style.Default,
-    style.Default,
-    style.none(),
+    style.new(style.Default, style.Default, style.none()),
   )
   |> clear.render(area)
   |> buf_str
@@ -377,16 +363,12 @@ pub fn clear_partial_area_test() {
   |> buffer.set_string(
     Position(x: 0, y: 0),
     "hello",
-    style.Default,
-    style.Default,
-    style.none(),
+    style.new(style.Default, style.Default, style.none()),
   )
   |> buffer.set_string(
     Position(x: 0, y: 1),
     "world",
-    style.Default,
-    style.Default,
-    style.none(),
+    style.new(style.Default, style.Default, style.none()),
   )
   |> clear.render(bottom_row)
   |> buf_str
@@ -401,9 +383,7 @@ pub fn clear_empty_area_is_noop_test() {
   |> buffer.set_string(
     Position(x: 0, y: 0),
     "hello",
-    style.Default,
-    style.Default,
-    style.none(),
+    style.new(style.Default, style.Default, style.none()),
   )
   |> clear.render(noop)
   |> buf_str
@@ -726,9 +706,7 @@ pub fn scrollbar_fully_visible_keeps_existing_content_test() {
   |> buffer.set_string(
     geometry.Position(0, 0),
     "│",
-    style.Default,
-    style.Default,
-    style.none(),
+    style.new(style.Default, style.Default, style.none()),
   )
   |> scrollbar.render_vertical(area, s)
   |> buf_str

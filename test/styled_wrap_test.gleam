@@ -21,7 +21,7 @@ fn rendered(t: Text) -> List(String) {
 fn styles_of(t: Text) -> List(List(#(String, Bool))) {
   list.map(t.lines, fn(l) {
     list.map(l.spans, fn(sp) {
-      #(sp.content, style.has(sp.modifier, style.bold()))
+      #(sp.content, style.has(sp.style.modifier, style.bold()))
     })
   })
 }
@@ -113,7 +113,7 @@ pub fn a_word_wider_than_the_line_is_broken_test() {
   |> should.equal(["supercal", "ifragili", "stic"])
   // Every piece keeps the style it was cut from.
   list.all(wrapped.lines, fn(l) {
-    list.all(l.spans, fn(sp) { style.has(sp.modifier, style.bold()) })
+    list.all(l.spans, fn(sp) { style.has(sp.style.modifier, style.bold()) })
   })
   |> should.equal(True)
 }

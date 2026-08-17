@@ -247,7 +247,12 @@ fn render_bar_rows(
         True -> {
           let fg =
             bar_color(c.fill, bar_idx, n_bars, dy, height, frame, c.period)
-          buffer.set_string(buf, pos, c.bar_char, fg, c.bg, style.none())
+          buffer.set_string(
+            buf,
+            pos,
+            c.bar_char,
+            style.new(fg, c.bg, style.none()),
+          )
         }
         False -> buf
       }

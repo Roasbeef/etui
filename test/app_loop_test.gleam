@@ -165,6 +165,7 @@ pub fn doc_snippets_compile_test() {
     bg: style.Indexed(0),
     modifier: style.bold(),
     sub_modifier: style.none(),
+    underline_color: style.Default,
   )
   |> fn(s) { s.fg }
   |> should.equal(style.Rgb(255, 128, 0))

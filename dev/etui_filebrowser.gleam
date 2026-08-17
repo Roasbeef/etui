@@ -215,13 +215,7 @@ fn entry_display_name(e: Entry) -> String {
 
 // Returns detail lines as span.Line for colored display.
 fn detail_span_lines(entry: Result(Entry, Nil)) -> List(span.Line) {
-  let label_style =
-    style.Style(
-      fg: style.Default,
-      bg: style.Default,
-      modifier: style.bold(),
-      sub_modifier: style.none(),
-    )
+  let label_style = style.new(style.Default, style.Default, style.bold())
   case entry {
     Error(_) -> [span.line_plain("(nothing selected)")]
     Ok(e) -> {

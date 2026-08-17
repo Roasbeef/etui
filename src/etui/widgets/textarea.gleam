@@ -75,12 +75,7 @@ pub fn textarea_new() -> TextArea {
     max_line_length: 0,
     fg: style.Default,
     bg: style.Default,
-    cursor_style: style.Style(
-      fg: style.Default,
-      bg: style.Default,
-      modifier: style.reverse(),
-      sub_modifier: style.none(),
-    ),
+    cursor_style: style.new(style.Default, style.Default, style.reverse()),
   )
 }
 
@@ -401,9 +396,7 @@ fn render_line(
       buf,
       geometry.Position(x: area.position.x, y: y),
       padded,
-      w.fg,
-      w.bg,
-      style.none(),
+      style.new(w.fg, w.bg, style.none()),
     )
   case is_cursor_row && state.cursor_x < width {
     False -> buf2
@@ -413,9 +406,7 @@ fn render_line(
         buf2,
         geometry.Position(x: area.position.x + state.cursor_x, y: y),
         cursor_ch,
-        w.cursor_style.fg,
-        w.cursor_style.bg,
-        w.cursor_style.modifier,
+        w.cursor_style,
       )
     }
   }

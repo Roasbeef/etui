@@ -155,9 +155,7 @@ fn filled(area: Rect, row: String) -> buffer.Buffer {
   buffer.buffer_new_filled(
     area,
     row,
-    style.Default,
-    style.Default,
-    style.none(),
+    style.new(style.Default, style.Default, style.none()),
   )
 }
 
@@ -201,9 +199,7 @@ fn wide_row() -> buffer.Buffer {
   |> buffer.set_string(
     Position(0, 0),
     "漢字ab",
-    style.Default,
-    style.Default,
-    style.none(),
+    style.new(style.Default, style.Default, style.none()),
   )
 }
 
@@ -237,9 +233,7 @@ pub fn a_wide_grapheme_that_cannot_fit_leaves_the_cell_blank_test() {
     |> buffer.set_string(
       Position(1, 0),
       "漢",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   shape(buf, 1)
   |> should.equal(" ")

@@ -247,9 +247,7 @@ pub fn render(
         buf,
         area.position,
         padded,
-        widget.fg,
-        widget.bg,
-        modifier,
+        style.new(widget.fg, widget.bg, modifier),
       )
     }
   }

@@ -173,9 +173,7 @@ fn render_lines(
               buf,
               geometry.Position(x: area.position.x, y: y),
               aligned_line,
-              para.fg,
-              para.bg,
-              para.modifier,
+              style.new(para.fg, para.bg, para.modifier),
             )
           render_lines(buf_new, area, para, rest, line_idx + 1)
         }

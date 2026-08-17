@@ -41,9 +41,7 @@ pub fn main() -> Nil {
       buf,
       pos,
       "hi",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let cell = buffer.get_cell(buf2, pos)
   let cell_sym = case cell.content {

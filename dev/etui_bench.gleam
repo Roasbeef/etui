@@ -112,9 +112,7 @@ fn filled(area: Rect) -> buffer.Buffer {
   buffer.buffer_new_filled(
     area,
     string.repeat("the quick brown fox ", 20),
-    style.Indexed(7),
-    style.Default,
-    style.none(),
+    style.new(style.Indexed(7), style.Default, style.none()),
   )
 }
 
@@ -125,9 +123,7 @@ fn one_cell_changed(area: Rect) -> #(buffer.Buffer, buffer.Buffer) {
       before,
       Position(3, 3),
       "X",
-      style.Indexed(1),
-      style.Default,
-      style.none(),
+      style.new(style.Indexed(1), style.Default, style.none()),
     )
   #(before, after)
 }
@@ -157,9 +153,7 @@ pub fn main() -> Nil {
       buffer.buffer_new(small()),
       Position(0, 0),
       string.repeat("x", 80),
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   })
 

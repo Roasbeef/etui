@@ -131,9 +131,7 @@ pub fn render_vertical(
             buf,
             geometry.Position(x: area.position.x, y: area.position.y),
             s.arrow_start,
-            s.fg,
-            s.bg,
-            style.none(),
+            style.new(s.fg, s.bg, style.none()),
           )
       }
       let buf = case has_end {
@@ -146,9 +144,7 @@ pub fn render_vertical(
               y: area.position.y + area.size.height - 1,
             ),
             s.arrow_end,
-            s.fg,
-            s.bg,
-            style.none(),
+            style.new(s.fg, s.bg, style.none()),
           )
       }
       case track_len <= 0 {
@@ -208,9 +204,7 @@ pub fn render_horizontal(
             buf,
             geometry.Position(x: area.position.x, y: area.position.y),
             s.arrow_start,
-            s.fg,
-            s.bg,
-            style.none(),
+            style.new(s.fg, s.bg, style.none()),
           )
       }
       let buf = case has_end {
@@ -223,9 +217,7 @@ pub fn render_horizontal(
               y: area.position.y,
             ),
             s.arrow_end,
-            s.fg,
-            s.bg,
-            style.none(),
+            style.new(s.fg, s.bg, style.none()),
           )
       }
       case track_len <= 0 {
@@ -292,7 +284,8 @@ fn render_vertical_track(
         True -> #(s.thumb_char, s.thumb_fg, s.thumb_bg)
         False -> #(s.track_char, s.fg, s.bg)
       }
-      let buf2 = buffer.set_string(buf, pos, ch, fg, bg, style.none())
+      let buf2 =
+        buffer.set_string(buf, pos, ch, style.new(fg, bg, style.none()))
       render_vertical_track(
         buf2,
         area,
@@ -324,7 +317,8 @@ fn render_horizontal_track(
         True -> #(s.thumb_char, s.thumb_fg, s.thumb_bg)
         False -> #(s.track_char, s.fg, s.bg)
       }
-      let buf2 = buffer.set_string(buf, pos, ch, fg, bg, style.none())
+      let buf2 =
+        buffer.set_string(buf, pos, ch, style.new(fg, bg, style.none()))
       render_horizontal_track(
         buf2,
         area,

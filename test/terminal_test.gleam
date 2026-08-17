@@ -181,9 +181,7 @@ pub fn frame_ops_repaints_in_full_on_a_first_frame_test() {
       blank,
       Position(0, 0),
       "abcde",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let ops =
     terminal.frame_ops(blank, filled, True, terminal.CursorUntouched, True)
@@ -208,18 +206,14 @@ pub fn frame_ops_emits_only_the_changed_cells_test() {
       buffer.buffer_new(screen),
       Position(0, 0),
       "abcde",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let after =
     buffer.set_string(
       before,
       Position(2, 0),
       "X",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   let ops =
     terminal.frame_ops(before, after, False, terminal.CursorUntouched, True)
@@ -402,9 +396,7 @@ pub fn only_a_fullscreen_viewport_clears_the_screen_test() {
       blank,
       Position(0, 5),
       "abcde",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   list.map(
     terminal.frame_ops(blank, filled, True, terminal.CursorUntouched, False),
@@ -432,9 +424,7 @@ pub fn an_inline_viewport_still_repaints_in_full_on_a_first_frame_test() {
       blank,
       Position(0, 5),
       "abcde",
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   case
     terminal.frame_ops(blank, filled, True, terminal.CursorUntouched, False)

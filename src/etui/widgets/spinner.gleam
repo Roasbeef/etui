@@ -72,7 +72,12 @@ pub fn render(
         "" -> char
         label -> char <> " " <> label
       }
-      buffer.set_string(buf, area.position, line, s.fg, s.bg, style.none())
+      buffer.set_string(
+        buf,
+        area.position,
+        line,
+        style.new(s.fg, s.bg, style.none()),
+      )
     }
   }
 }

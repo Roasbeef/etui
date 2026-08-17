@@ -101,9 +101,7 @@ pub fn render(
           buf,
           geometry.Position(x: area.position.x, y: y),
           bg_row,
-          sb.fg,
-          sb.bg,
-          style.none(),
+          style.new(sb.fg, sb.bg, style.none()),
         )
 
       // The three sections are given disjoint spans of the bar, so a bar too
@@ -161,15 +159,15 @@ fn section_width(lines: List(span.Line)) -> Int {
 fn inherit_bar_style(line: span.Line, sb: StatusBar) -> span.Line {
   span.line_aligned(
     list.map(line.spans, fn(sp: span.Span) {
-      let fg = case sp.fg {
+      let fg = case sp.style.fg {
         style.Default -> sb.fg
-        _ -> sp.fg
+        _ -> sp.style.fg
       }
-      let bg = case sp.bg {
+      let bg = case sp.style.bg {
         style.Default -> sb.bg
-        _ -> sp.bg
+        _ -> sp.style.bg
       }
-      span.Span(..sp, fg: fg, bg: bg)
+      span.Span(..sp, style: style.with_bg(style.with_fg(sp.style, fg), bg))
     }),
     line.alignment,
   )

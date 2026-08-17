@@ -152,9 +152,7 @@ fn render_help_rows(
               buf,
               geometry.Position(x: area.position.x, y: area.position.y + row),
               padded,
-              st.fg,
-              st.bg,
-              st.modifier,
+              st,
             )
           render_help_rows(buf2, area, rest, key_w, st, row + 1)
         }

@@ -397,9 +397,7 @@ fn render_field_row(
         buf,
         geometry.Position(x: area.position.x, y: y),
         label_text,
-        f.fg,
-        f.bg,
-        label_modifier,
+        style.new(f.fg, f.bg, label_modifier),
       )
   }
 
@@ -412,9 +410,7 @@ fn render_field_row(
         buf1,
         geometry.Position(x: value_x, y: y),
         padded_value,
-        val_fg,
-        val_bg,
-        style.none(),
+        style.new(val_fg, val_bg, style.none()),
       )
   }
 
@@ -430,9 +426,7 @@ fn render_field_row(
         buf2,
         geometry.Position(x: value_x, y: error_y),
         text.truncate("  " <> field.error, value_w, ""),
-        f.error_fg,
-        f.bg,
-        style.none(),
+        style.new(f.error_fg, f.bg, style.none()),
       )
   }
 }

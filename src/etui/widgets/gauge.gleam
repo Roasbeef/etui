@@ -128,9 +128,7 @@ fn render_bar(
         buf2,
         geometry.Position(x: label_x, y: area.position.y),
         text.truncate(label, width, ""),
-        g.fg,
-        g.bg,
-        style.none(),
+        style.new(g.fg, g.bg, style.none()),
       )
     }
   }
@@ -168,9 +166,7 @@ fn do_fill(
           pos,
           buffer.Cell(
             content: buffer.Content(symbol: char, width: 1),
-            fg: fg,
-            bg: bg,
-            modifier: modifier,
+            style: style.new(fg, bg, modifier),
             link: "",
           ),
         )

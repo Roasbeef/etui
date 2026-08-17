@@ -40,7 +40,7 @@ import etui/widgets/paragraph
 let para =
   paragraph.paragraph_new("Text that wraps at area width")
   |> paragraph.with_alignment(text.Left)    // Left, Center, Right
-  |> paragraph.with_style(style.Style(...))
+  |> paragraph.with_style(style.new(...))
 
 paragraph.render(buf, area, para)
 ```
@@ -59,7 +59,7 @@ import etui/widgets/list as glist
 let items = ["item 1", "item 2", "item 3"]
 let l =
   glist.list_new(items)
-  |> glist.with_highlight_style(style.Style(...))
+  |> glist.with_highlight_style(style.new(...))
 
 let state = glist.state_new()
 // Navigate
@@ -512,7 +512,7 @@ let t =
     ]),
     tree.leaf("readme", "README.md"),
   ])
-  |> tree.with_highlight_style(style.Style(...))
+  |> tree.with_highlight_style(style.new(...))
 
 let state = tree.state_from_tree(t)   // first root selected
 

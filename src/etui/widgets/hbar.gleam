@@ -178,9 +178,7 @@ fn render_row(
       buf,
       geometry.Position(x: area.position.x, y: y),
       label,
-      style.Default,
-      style.Default,
-      style.none(),
+      style.new(style.Default, style.Default, style.none()),
     )
   // Bar area
   let bar_x = area.position.x + lw + 1
@@ -199,9 +197,7 @@ fn render_row(
         buf,
         geometry.Position(x: bar_x + bar_w + 1, y: y),
         int.to_string(it.value),
-        style.Default,
-        style.Default,
-        style.none(),
+        style.new(style.Default, style.Default, style.none()),
       )
   }
 }
@@ -241,9 +237,7 @@ fn render_filled_loop(
           buf,
           geometry.Position(x: base_x + i, y: y),
           h.bar_char,
-          fg,
-          h.bg,
-          style.none(),
+          style.new(fg, h.bg, style.none()),
         )
       render_filled_loop(
         buf2,
@@ -287,9 +281,7 @@ fn render_empty_loop(
           buf,
           geometry.Position(x: base_x + i, y: y),
           h.empty_char,
-          style.Default,
-          h.bg,
-          style.none(),
+          style.new(style.Default, h.bg, style.none()),
         )
       render_empty_loop(buf2, h, base_x, y, count, i + 1)
     }

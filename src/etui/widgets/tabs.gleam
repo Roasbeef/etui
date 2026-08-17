@@ -39,6 +39,7 @@ pub fn tabs_new(labels: List(String)) -> Tabs {
       bg: style.Default,
       modifier: style.add(style.bold(), style.reverse()),
       sub_modifier: style.none(),
+      underline_color: style.Default,
     ),
     divider: "│",
     padding: 1,
@@ -117,9 +118,7 @@ fn render_tabs(
           buf,
           geometry.Position(x: x, y: area.position.y),
           shown,
-          fg,
-          bg,
-          modifier,
+          style.new(fg, bg, modifier),
         )
       let next_x = x + string_length(content)
       case rest {
@@ -134,9 +133,7 @@ fn render_tabs(
                   buf2,
                   geometry.Position(x: next_x, y: area.position.y),
                   t.divider,
-                  t.fg,
-                  t.bg,
-                  style.none(),
+                  style.new(t.fg, t.bg, style.none()),
                 )
               render_tabs(
                 buf3,

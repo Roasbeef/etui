@@ -74,24 +74,9 @@ pub fn dialog_new(message: String) -> Dialog {
     height: 0,
     fg: style.Default,
     bg: style.Default,
-    confirm_style: style.Style(
-      fg: style.Default,
-      bg: style.Default,
-      modifier: style.none(),
-      sub_modifier: style.none(),
-    ),
-    cancel_style: style.Style(
-      fg: style.Default,
-      bg: style.Default,
-      modifier: style.none(),
-      sub_modifier: style.none(),
-    ),
-    focused_style: style.Style(
-      fg: style.Default,
-      bg: style.Default,
-      modifier: style.reverse(),
-      sub_modifier: style.none(),
-    ),
+    confirm_style: style.new(style.Default, style.Default, style.none()),
+    cancel_style: style.new(style.Default, style.Default, style.none()),
+    focused_style: style.new(style.Default, style.Default, style.reverse()),
     border: block.Rounded,
   )
 }
@@ -222,9 +207,7 @@ pub fn render(
         buf1,
         geometry.Position(x: msg_x, y: msg_y),
         text.truncate(d.message, inner.size.width, "…"),
-        d.fg,
-        d.bg,
-        style.none(),
+        style.new(d.fg, d.bg, style.none()),
       )
   }
 
@@ -257,18 +240,14 @@ fn render_buttons(
       buf,
       geometry.Position(x: btn_x, y: btn_y),
       d.confirm_label,
-      conf_st.fg,
-      conf_st.bg,
-      conf_st.modifier,
+      conf_st,
     )
   let buf2 =
     buffer.set_string(
       buf1,
       geometry.Position(x: btn_x + conf_w + 1, y: btn_y),
       d.cancel_label,
-      canc_st.fg,
-      canc_st.bg,
-      canc_st.modifier,
+      canc_st,
     )
   buf2
 }

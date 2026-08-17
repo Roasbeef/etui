@@ -56,7 +56,12 @@ fn render_horizontal_line(
     False -> {
       let pos = geometry.Position(x: area.position.x + x, y: area.position.y)
       let buf_new =
-        buffer.set_string(buf, pos, char, l.fg, style.Default, style.none())
+        buffer.set_string(
+          buf,
+          pos,
+          char,
+          style.new(l.fg, style.Default, style.none()),
+        )
       render_horizontal_line(buf_new, area, l, x + 1, char)
     }
   }
@@ -89,7 +94,12 @@ fn render_vertical_line(
     False -> {
       let pos = geometry.Position(x: area.position.x, y: area.position.y + y)
       let buf_new =
-        buffer.set_string(buf, pos, char, l.fg, style.Default, style.none())
+        buffer.set_string(
+          buf,
+          pos,
+          char,
+          style.new(l.fg, style.Default, style.none()),
+        )
       render_vertical_line(buf_new, area, l, y + 1, char)
     }
   }

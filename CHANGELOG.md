@@ -18,6 +18,13 @@ Small, but they will not compile silently:
 - **`geometry.split_flex` is gone; use `split_with`.** After the layout rework
   the two had the same arity, the same argument order and the same body, and
   two names for one function is not an API.
+- **The buffer takes a `Style` where it used to take `fg`, `bg` and
+  `modifier`.** `buffer.set_string`, `set_string_linked`, `buffer_new_filled`
+  and `continuation_cell` all lost two arguments, and `buffer.Cell` and
+  `span.Span` hold a `style` field in place of the three. `style.new(fg, bg,
+  modifier)` is the one-line fix at a call site that has the three on hand.
+  The three fields could not grow a fourth without every one of those
+  signatures growing with it, which is what `underline_color` needed.
 - **`keys.match` answers `Unknown` rather than `Char` for a multi-grapheme
   string.** With modified keys now reaching the app, `"shift+left"` would have
   arrived at a text field as a ten-grapheme "character" to insert. Single
@@ -61,6 +68,17 @@ Small, but they will not compile silently:
 - **`style.sub_modifier`:** a style can now take a modifier away, not only add
   one. A theme that sets bold everywhere and one widget that must not be bold
   was previously impossible to express.
+- **`style.underline_color` (SGR 58):** an underline in a colour of its own,
+  independent of the text it sits under — a red squiggle under black text,
+  which is the thing underlines are most used for and the one thing they could
+  not say. `style.with_underline_color` and `span.span_underline_color` set it,
+  `style.patch` layers it like `fg` and `bg`. Terminals without SGR 58 ignore
+  the sequence and draw the underline in the foreground colour, exactly as
+  before.
+- **`style.new/3` and `style.resolve/1`,** and the buffer accessors
+  `cell_style` and `cell_underline_color`. `resolve` settles a style into what
+  a cell shows: a cell holds no unspent `sub_modifier`, so two cells that look
+  identical compare equal and a steady frame diffs to nothing.
 - **`style.hidden` and `style.rapid_blink`.** Hidden reserves its cells without
   drawing them, which is what a password field wants when it has to keep its
   layout.

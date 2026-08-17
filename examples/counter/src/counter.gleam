@@ -25,10 +25,18 @@ pub fn main() {
 
 fn view(model: Model, screen: Rect) -> buffer.Buffer {
   let chunks = geometry.split(Horizontal, screen, [Percentage(30), Fill])
-  let left = case chunks { [l, ..] -> l _ -> screen }
-  let right = case chunks { [_, r, ..] -> r _ -> screen }
+  let left = case chunks {
+    [l, ..] -> l
+    _ -> screen
+  }
+  let right = case chunks {
+    [_, r, ..] -> r
+    _ -> screen
+  }
   let para =
-    paragraph.paragraph_new("Count: " <> int.to_string(model.count) <> "  (space +1, q quit)")
+    paragraph.paragraph_new(
+      "Count: " <> int.to_string(model.count) <> "  (space +1, q quit)",
+    )
   let blk =
     block.block_new()
     |> block.with_border(block.Rounded)

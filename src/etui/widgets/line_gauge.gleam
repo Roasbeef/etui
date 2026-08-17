@@ -150,9 +150,7 @@ pub fn render(
           buf,
           geometry.Position(x: pos.x, y: y),
           text.truncate(line, filled_w, ""),
-          g.fg,
-          g.bg,
-          g.filled_modifier,
+          style.new(g.fg, g.bg, g.filled_modifier),
         )
 
       // Write unfilled portion
@@ -160,9 +158,7 @@ pub fn render(
         buf,
         geometry.Position(x: pos.x + filled_w, y: y),
         text.truncate(drop_cells(line, filled_w), unfilled_w, ""),
-        g.fg,
-        g.bg,
-        g.unfilled_modifier,
+        style.new(g.fg, g.bg, g.unfilled_modifier),
       )
     }
   }

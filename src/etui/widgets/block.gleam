@@ -171,9 +171,7 @@ fn render_bordered(
       let cell_border =
         buffer.Cell(
           content: buffer.Content(symbol: border_h, width: 1),
-          fg: blk.fg,
-          bg: blk.bg,
-          modifier: style.none(),
+          style: style.new(blk.fg, blk.bg, style.none()),
           link: "",
         )
 
@@ -183,9 +181,7 @@ fn render_bordered(
           geometry.Position(x: x0, y: y0),
           buffer.Cell(
             content: buffer.Content(symbol: corner_tl, width: 1),
-            fg: blk.fg,
-            bg: blk.bg,
-            modifier: style.none(),
+            style: style.new(blk.fg, blk.bg, style.none()),
             link: "",
           ),
         )
@@ -195,9 +191,7 @@ fn render_bordered(
           geometry.Position(x: x_right, y: y0),
           buffer.Cell(
             content: buffer.Content(symbol: corner_tr, width: 1),
-            fg: blk.fg,
-            bg: blk.bg,
-            modifier: style.none(),
+            style: style.new(blk.fg, blk.bg, style.none()),
             link: "",
           ),
         )
@@ -207,9 +201,7 @@ fn render_bordered(
           geometry.Position(x: x0, y: y_bottom),
           buffer.Cell(
             content: buffer.Content(symbol: corner_bl, width: 1),
-            fg: blk.fg,
-            bg: blk.bg,
-            modifier: style.none(),
+            style: style.new(blk.fg, blk.bg, style.none()),
             link: "",
           ),
         )
@@ -219,9 +211,7 @@ fn render_bordered(
           geometry.Position(x: x_right, y: y_bottom),
           buffer.Cell(
             content: buffer.Content(symbol: corner_br, width: 1),
-            fg: blk.fg,
-            bg: blk.bg,
-            modifier: style.none(),
+            style: style.new(blk.fg, blk.bg, style.none()),
             link: "",
           ),
         )
@@ -234,9 +224,7 @@ fn render_bordered(
       let cell_v =
         buffer.Cell(
           content: buffer.Content(symbol: border_v, width: 1),
-          fg: blk.fg,
-          bg: blk.bg,
-          modifier: style.none(),
+          style: style.new(blk.fg, blk.bg, style.none()),
           link: "",
         )
       let buf7 = draw_vertical_line(buf6, x0, y0 + 1, y_bottom - 1, cell_v)
@@ -287,9 +275,7 @@ fn render_title(
             buf,
             geometry.Position(x: x0 + x_offset, y: y),
             t,
-            blk.fg,
-            blk.bg,
-            style.none(),
+            style.new(blk.fg, blk.bg, style.none()),
           )
         }
       }
@@ -323,9 +309,7 @@ fn fill_bg_area(
           buf,
           geometry.Position(x: area.position.x, y: y),
           row,
-          fg,
-          bg,
-          style.none(),
+          style.new(fg, bg, style.none()),
         )
       fill_bg_area(buf2, area, fg, bg, y + 1)
     }

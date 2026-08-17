@@ -159,9 +159,7 @@ fn render_determinate(
         buf2,
         geometry.Position(x: lx, y: area.position.y),
         text.truncate(label, width, ""),
-        p.fg,
-        p.bg,
-        style.none(),
+        style.new(p.fg, p.bg, style.none()),
       )
     }
   }
@@ -236,9 +234,7 @@ fn do_fill(
           pos,
           buffer.Cell(
             content: buffer.Content(symbol: char, width: 1),
-            fg: fg,
-            bg: bg,
-            modifier: modifier,
+            style: style.new(fg, bg, modifier),
             link: "",
           ),
         )

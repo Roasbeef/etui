@@ -112,9 +112,7 @@ fn render_short(
     buf,
     area.position,
     padded,
-    h.description_fg,
-    h.bg,
-    style.none(),
+    style.new(h.description_fg, h.bg, style.none()),
   )
 }
 
@@ -155,9 +153,7 @@ fn render_full_rows(
               buf,
               geometry.Position(x: area.position.x, y: y),
               key_padded,
-              h.key_fg,
-              h.bg,
-              style.bold(),
+              style.new(h.key_fg, h.bg, style.bold()),
             )
           let desc_text = text.truncate(b.description, desc_col, "")
           let desc_padded = text.pad_right(desc_text, desc_col)
@@ -166,9 +162,7 @@ fn render_full_rows(
               buf2,
               geometry.Position(x: area.position.x + key_col + 1, y: y),
               desc_padded,
-              h.description_fg,
-              h.bg,
-              style.none(),
+              style.new(h.description_fg, h.bg, style.none()),
             )
           render_full_rows(buf3, area, h, rest, row + 1, key_col, desc_col)
         }

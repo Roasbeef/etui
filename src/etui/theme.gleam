@@ -100,112 +100,57 @@ pub type Theme {
 
 /// Normal text: fg on bg.
 pub fn normal(t: Theme) -> style.Style {
-  style.Style(
-    fg: t.fg,
-    bg: t.bg,
-    modifier: style.none(),
-    sub_modifier: style.none(),
-  )
+  style.new(t.fg, t.bg, style.none())
 }
 
 /// Selected item: selection_fg on selection_bg.
 pub fn selection(t: Theme) -> style.Style {
-  style.Style(
-    fg: t.selection_fg,
-    bg: t.selection_bg,
-    modifier: style.none(),
-    sub_modifier: style.none(),
-  )
+  style.new(t.selection_fg, t.selection_bg, style.none())
 }
 
 /// Accent text: accent on bg.
 pub fn accent_style(t: Theme) -> style.Style {
-  style.Style(
-    fg: t.accent,
-    bg: t.bg,
-    modifier: style.none(),
-    sub_modifier: style.none(),
-  )
+  style.new(t.accent, t.bg, style.none())
 }
 
 /// Border color: border on bg.
 pub fn border_style(t: Theme) -> style.Style {
-  style.Style(
-    fg: t.border,
-    bg: t.bg,
-    modifier: style.none(),
-    sub_modifier: style.none(),
-  )
+  style.new(t.border, t.bg, style.none())
 }
 
 /// Title color: title on bg.
 pub fn title_style(t: Theme) -> style.Style {
-  style.Style(
-    fg: t.title,
-    bg: t.bg,
-    modifier: style.none(),
-    sub_modifier: style.none(),
-  )
+  style.new(t.title, t.bg, style.none())
 }
 
 /// Muted/secondary text: muted on bg.
 pub fn muted_style(t: Theme) -> style.Style {
-  style.Style(
-    fg: t.muted,
-    bg: t.bg,
-    modifier: style.none(),
-    sub_modifier: style.none(),
-  )
+  style.new(t.muted, t.bg, style.none())
 }
 
 /// Error text: error color on bg, bold.
 pub fn error_style(t: Theme) -> style.Style {
-  style.Style(
-    fg: t.error,
-    bg: t.bg,
-    modifier: style.bold(),
-    sub_modifier: style.none(),
-  )
+  style.new(t.error, t.bg, style.bold())
 }
 
 /// Warning text: warning color on bg.
 pub fn warning_style(t: Theme) -> style.Style {
-  style.Style(
-    fg: t.warning,
-    bg: t.bg,
-    modifier: style.none(),
-    sub_modifier: style.none(),
-  )
+  style.new(t.warning, t.bg, style.none())
 }
 
 /// Success text: success color on bg.
 pub fn success_style(t: Theme) -> style.Style {
-  style.Style(
-    fg: t.success,
-    bg: t.bg,
-    modifier: style.none(),
-    sub_modifier: style.none(),
-  )
+  style.new(t.success, t.bg, style.none())
 }
 
 /// Info text: info color on bg.
 pub fn info_style(t: Theme) -> style.Style {
-  style.Style(
-    fg: t.info,
-    bg: t.bg,
-    modifier: style.none(),
-    sub_modifier: style.none(),
-  )
+  style.new(t.info, t.bg, style.none())
 }
 
 /// Status bar: statusbar_fg on statusbar_bg.
 pub fn statusbar_style(t: Theme) -> style.Style {
-  style.Style(
-    fg: t.statusbar_fg,
-    bg: t.statusbar_bg,
-    modifier: style.none(),
-    sub_modifier: style.none(),
-  )
+  style.new(t.statusbar_fg, t.statusbar_bg, style.none())
 }
 
 // ─────────────────────────────────────────────────────────────────

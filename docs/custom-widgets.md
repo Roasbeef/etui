@@ -51,7 +51,7 @@ frozen(buf, area)
 let pulse_w: widget.AnimatedWidget = fn(buf, area, frame) {
   let bright = frame % 30 < 15
   let color = case bright { True -> style.Rgb(255, 255, 0) False -> style.Rgb(128, 128, 0) }
-  let s = style.Style(fg: color, bg: style.Default, modifier: style.none())
+  let s = style.new(color, style.Default, style.none())
   paragraph.render(buf, area, paragraph.paragraph_new("●") |> paragraph.with_style(s))
 }
 
@@ -146,7 +146,7 @@ import etui/style
 
 fn custom_render(buf: buffer.Buffer, area: geometry.Rect) -> buffer.Buffer {
   let pos = area.position
-  buffer.set_string(buf, pos, "custom", style.Default, style.Default, style.none())
+  buffer.set_string(buf, pos, "custom", style.default_style())
 }
 ```
 

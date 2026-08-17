@@ -122,7 +122,8 @@ fn render_cols(
       let ch = bar_char(level)
       let fg = cell_color(s.fill, x, width, frame, s.period)
       let pos = geometry.Position(x: area.position.x + x, y: area.position.y)
-      let buf2 = buffer.set_string(buf, pos, ch, fg, s.bg, s.modifier)
+      let buf2 =
+        buffer.set_string(buf, pos, ch, style.new(fg, s.bg, s.modifier))
       render_cols(buf2, area, s, rest, x + 1, width, max, frame)
     }
   }

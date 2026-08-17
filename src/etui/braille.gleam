@@ -90,9 +90,7 @@ pub fn flush(
         y: area.position.y + char_y,
       ),
       ch,
-      fg,
-      bg,
-      style.none(),
+      style.new(fg, bg, style.none()),
     )
   })
 }

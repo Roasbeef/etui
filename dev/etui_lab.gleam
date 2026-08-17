@@ -282,12 +282,7 @@ fn chrome(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
           True ->
             styled(
               " " <> label <> " ",
-              style.Style(
-                fg: style.Indexed(16),
-                bg: accent,
-                modifier: style.bold(),
-                sub_modifier: style.none(),
-              ),
+              style.new(style.Indexed(16), accent, style.bold()),
             )
           False -> tinted(" " <> label <> " ", muted)
         }
@@ -299,12 +294,7 @@ fn chrome(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
   |> line_at(0, h - 1, w, [
     styled(
       text.pad_right(" 1-5 screens   TAB cycle   ←/→ adjust   q quit", w),
-      style.Style(
-        fg: muted,
-        bg: bar_bg,
-        modifier: style.none(),
-        sub_modifier: style.none(),
-      ),
+      style.new(muted, bar_bg, style.none()),
     ),
   ])
 }
@@ -419,12 +409,7 @@ fn render_layout(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
             <> int.to_string(col.size.width),
           col.size.width,
         ),
-        style.Style(
-          fg: style.Indexed(16),
-          bg: shade,
-          modifier: style.none(),
-          sub_modifier: style.none(),
-        ),
+        style.new(style.Indexed(16), shade, style.none()),
       ),
     ])
   })
@@ -438,17 +423,22 @@ fn render_layout(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
 // right, that is the terminal's answer, not the library's: several of these
 // attributes are widely ignored.
 
-/// The SGR parameters a modifier emits, e.g. "1" for bold or "6" for rapid
-/// blink. Printed next to each sample so a terminal that ignores an attribute
-/// can be told apart from a library that never asked for it.
-fn sgr(m: style.Modifier) -> String {
-  case style.ansi_modifier(m) {
+/// The SGR parameters a style emits, e.g. "1" for bold, "6" for rapid blink,
+/// "58;5;2" for a green underline. Printed next to each sample so a terminal
+/// that ignores an attribute can be told apart from a library that never
+/// asked for it.
+fn sgr(st: style.Style) -> String {
+  let params =
+    {
+      style.ansi_modifier(st.modifier)
+      <> style.ansi_underline_color(st.underline_color)
+    }
+    |> string.replace("\u{001B}[", " ")
+    |> string.replace("m", "")
+    |> string.trim
+  case params {
     "" -> "-"
-    seq ->
-      "SGR "
-      <> seq
-      |> string.replace("\u{001B}[", "")
-      |> string.replace("m", "")
+    p -> "SGR " <> p
   }
 }
 
@@ -465,7 +455,7 @@ fn sample_row(
   line_at(buf, x, y, w, [
     tinted(text.pad_right(name, 16), muted),
     styled(text.pad_right(sample, 26), st),
-    tinted(text.pad_right(sgr(st.modifier), 10), style.Indexed(238)),
+    tinted(text.pad_right(sgr(st), 14), style.Indexed(238)),
     plain(expect),
   ])
 }
@@ -489,7 +479,7 @@ fn render_styles(buf: buffer.Buffer, screen: Rect) -> buffer.Buffer {
     |> line_at(x, area.position.y + 3, w, [
       tinted(text.pad_right("style", 16), style.Indexed(238)),
       tinted(text.pad_right("sample", 26), style.Indexed(238)),
-      tinted(text.pad_right("emits", 10), style.Indexed(238)),
+      tinted(text.pad_right("emits", 14), style.Indexed(238)),
       tinted("should look", style.Indexed(238)),
     ])
     |> sample_row(
@@ -557,13 +547,58 @@ fn render_styles(buf: buffer.Buffer, screen: Rect) -> buffer.Buffer {
       )
     })
 
-  line_at(buf, x, area.position.y + 21, w, [
-    tinted("hidden check  ", muted),
-    plain("["),
-    styled("SECRET", base |> style.add_modifier(style.hidden())),
-    plain("]"),
-    tinted("  the brackets must stay six cells apart", muted),
-  ])
+  let buf =
+    line_at(buf, x, area.position.y + 21, w, [
+      tinted("hidden check  ", muted),
+      plain("["),
+      styled("SECRET", base |> style.add_modifier(style.hidden())),
+      plain("]"),
+      tinted("  the brackets must stay six cells apart", muted),
+    ])
+
+  // The underline in a colour of its own. SGR 58 is younger than the rest of
+  // this screen and a good half of terminals ignore it, so the last row is
+  // the control: same colour asked for, no underline turned on, nothing to
+  // see. A terminal that draws all four rows the same is telling you it does
+  // not implement 58 — the sequence column shows etui asked anyway.
+  let underlined = base |> style.add_modifier(style.underline())
+  let buf =
+    heading(
+      buf,
+      rect_new(x, area.position.y + 23, w, 2),
+      "AN UNDERLINE OF ITS OWN COLOUR",
+      "the text stays its colour, the line under it does not. Needs SGR 58.",
+    )
+  let unders = [
+    #("red squiggle", style.Rgb(220, 60, 60), "black text, red line"),
+    #("green", style.Indexed(2), "black text, green line"),
+    #("default", style.Default, "line takes the text colour"),
+  ]
+  let buf =
+    list.index_fold(unders, buf, fn(acc, u, i) {
+      let #(name, colour, expect) = u
+      sample_row(
+        acc,
+        x,
+        area.position.y + 26 + i,
+        w,
+        name,
+        underlined |> style.with_underline_color(colour),
+        "misspellled word",
+        expect,
+      )
+    })
+
+  sample_row(
+    buf,
+    x,
+    area.position.y + 29,
+    w,
+    "no underline",
+    base |> style.with_underline_color(style.Rgb(220, 60, 60)),
+    "misspellled word",
+    "PLAIN  <- control, a colour alone draws nothing",
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -705,11 +740,10 @@ fn render_scroll(
       let inner = block.inner(list_pane, blk)
       let widget =
         list_w.list_new(items)
-        |> list_w.with_highlight_style(style.Style(
-          fg: style.Indexed(16),
-          bg: accent,
-          modifier: style.none(),
-          sub_modifier: style.none(),
+        |> list_w.with_highlight_style(style.new(
+          style.Indexed(16),
+          accent,
+          style.none(),
         ))
       let buf =
         buf

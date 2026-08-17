@@ -137,12 +137,7 @@ pub fn tree_new(roots: List(TreeNode)) -> TreeWidget {
     roots: roots,
     fg: style.Default,
     bg: style.Default,
-    highlight_style: style.Style(
-      fg: style.Default,
-      bg: style.Default,
-      modifier: style.reverse(),
-      sub_modifier: style.none(),
-    ),
+    highlight_style: style.new(style.Default, style.Default, style.reverse()),
     glyphs: default_glyphs(),
   )
 }
@@ -390,9 +385,7 @@ fn render_rows(
               buf,
               geometry.Position(x: area.position.x, y: y),
               padded,
-              fg,
-              bg,
-              modifier,
+              style.new(fg, bg, modifier),
             )
           render_rows(buf2, area, t, state, rows, scroll, row_offset + 1)
         }

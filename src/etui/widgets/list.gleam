@@ -36,12 +36,7 @@ pub fn list_new(items: List(String)) -> ListWidget {
     items: glist.map(items, span.line_plain),
     fg: style.Default,
     bg: style.Default,
-    highlight_style: style.Style(
-      fg: style.Default,
-      bg: style.Default,
-      modifier: style.reverse(),
-      sub_modifier: style.none(),
-    ),
+    highlight_style: style.new(style.Default, style.Default, style.reverse()),
     blink_period: 0,
   )
 }
@@ -59,12 +54,7 @@ pub fn list_new_styled(items: List(span.Line)) -> ListWidget {
     items: items,
     fg: style.Default,
     bg: style.Default,
-    highlight_style: style.Style(
-      fg: style.Default,
-      bg: style.Default,
-      modifier: style.reverse(),
-      sub_modifier: style.none(),
-    ),
+    highlight_style: style.new(style.Default, style.Default, style.reverse()),
     blink_period: 0,
   )
 }
@@ -196,9 +186,7 @@ fn do_render(
           buf,
           geometry.Position(x: area.position.x, y: y),
           bg_row,
-          row_fg,
-          row_bg,
-          row_mod,
+          style.new(row_fg, row_bg, row_mod),
         )
       let buf2 = case get_item_at(l.items, item_idx) {
         Error(_) -> buf1
@@ -214,9 +202,7 @@ fn do_render(
               buf1,
               geometry.Position(x: area.position.x, y: y),
               prefix,
-              row_fg,
-              row_bg,
-              row_mod,
+              style.new(row_fg, row_bg, row_mod),
             )
           // Spans get their own colors; selected highlight comes from bg row.
           let effective_line = case is_selected {
@@ -241,19 +227,19 @@ fn do_render(
 fn apply_highlight_to_line(line: span.Line, hl: style.Style) -> span.Line {
   span.line_new(
     glist.map(line.spans, fn(sp) {
-      let new_fg = case sp.fg {
+      let new_fg = case sp.style.fg {
         style.Default -> hl.fg
-        _ -> sp.fg
+        _ -> sp.style.fg
       }
-      let new_bg = case sp.bg {
+      let new_bg = case sp.style.bg {
         style.Default -> hl.bg
-        _ -> sp.bg
+        _ -> sp.style.bg
       }
-      let new_mod = case style.modifier_equal(sp.modifier, style.none()) {
+      let new_mod = case style.modifier_equal(sp.style.modifier, style.none()) {
         True -> hl.modifier
-        False -> sp.modifier
+        False -> sp.style.modifier
       }
-      span.Span(..sp, fg: new_fg, bg: new_bg, modifier: new_mod)
+      span.Span(..sp, style: style.new(new_fg, new_bg, new_mod))
     }),
   )
 }

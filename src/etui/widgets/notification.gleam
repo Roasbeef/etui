@@ -248,9 +248,7 @@ fn render_items(
                 buf_b,
                 geometry.Position(x: msg_x, y: inner.position.y),
                 text.truncate(n.message, inner.size.width, "…"),
-                fg,
-                bg,
-                style.none(),
+                style.new(fg, bg, style.none()),
               )
           }
         }

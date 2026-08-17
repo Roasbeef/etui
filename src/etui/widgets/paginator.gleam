@@ -126,9 +126,7 @@ pub fn render(
         buf,
         geometry.Position(x: area.position.x + x_off, y: area.position.y),
         text.truncate(txt, area.size.width, ""),
-        p.fg,
-        p.bg,
-        style.none(),
+        style.new(p.fg, p.bg, style.none()),
       )
     }
   }

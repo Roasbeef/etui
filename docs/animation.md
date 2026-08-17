@@ -76,7 +76,7 @@ let c = color.lerp_rgb(
   model.anim.frame,
   60,
 )
-let s = style.Style(fg: c, bg: style.Default, modifier: style.none())
+let s = style.new(c, style.Default, style.none())
 ```
 
 `color.lerp_rgb` interpolates R, G, B channels independently using integer math.
@@ -127,7 +127,7 @@ fn view(model: Model, screen: geometry.Rect) -> buffer.Buffer {
 
   let para =
     paragraph.paragraph_new("etui")
-    |> paragraph.with_style(style.Style(fg: color, bg: style.Default, modifier: style.bold()))
+    |> paragraph.with_style(style.new(color, style.Default, style.bold()))
 
   buffer.buffer_new(screen)
   |> paragraph.render(screen, para)

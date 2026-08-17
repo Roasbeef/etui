@@ -106,7 +106,8 @@ pub fn modifier_equal(a: Modifier, b: Modifier) -> Bool {
 // ─────────────────────────────────────────────────────────────────
 // Composite style
 
-/// Combined foreground color, background color, and text modifiers.
+/// Combined foreground color, background color, text modifiers, and the
+/// colour the underline itself is drawn in.
 ///
 /// A style carries modifiers it turns *on* (`modifier`) and modifiers it turns
 /// *off* (`sub_modifier`). The second exists so a style can be laid over
@@ -114,15 +115,46 @@ pub fn modifier_equal(a: Modifier, b: Modifier) -> Bool {
 /// widget that must not be bold is otherwise impossible to express, because an
 /// empty `modifier` in the overlay means "change nothing", not "clear".
 ///
+/// `underline_color` is independent of `fg`: a spell-checker underlines in red
+/// under text that stays its own colour. It only shows with the `underline`
+/// modifier on, and only on terminals that implement SGR 58 (kitty, VTE,
+/// WezTerm, iTerm2); the rest ignore the sequence and draw the underline in
+/// the foreground colour, which is the pre-2.0 behaviour.
+///
 /// Build with `add_modifier` and `remove_modifier` rather than setting the two
-/// fields directly; they keep the pair consistent.
+/// modifier fields directly; they keep the pair consistent.
 pub type Style {
-  Style(fg: Color, bg: Color, modifier: Modifier, sub_modifier: Modifier)
+  Style(
+    fg: Color,
+    bg: Color,
+    modifier: Modifier,
+    sub_modifier: Modifier,
+    underline_color: Color,
+  )
 }
 
 /// Default style: terminal colors, no modifiers.
 pub fn default_style() -> Style {
-  Style(fg: Default, bg: Default, modifier: none(), sub_modifier: none())
+  Style(
+    fg: Default,
+    bg: Default,
+    modifier: none(),
+    sub_modifier: none(),
+    underline_color: Default,
+  )
+}
+
+/// A style from the three things most call sites have on hand.
+/// `sub_modifier` is empty and the underline takes the foreground colour;
+/// reach for `remove_modifier` and `with_underline_color` for those.
+pub fn new(fg: Color, bg: Color, modifier: Modifier) -> Style {
+  Style(
+    fg: fg,
+    bg: bg,
+    modifier: modifier,
+    sub_modifier: none(),
+    underline_color: Default,
+  )
 }
 
 /// Set foreground color on a style.
@@ -140,29 +172,35 @@ pub fn with_modifier(s: Style, m: Modifier) -> Style {
   Style(..s, modifier: m)
 }
 
+/// Colour the underline separately from the text.
+/// Only visible with `underline()` on, and only where SGR 58 is supported.
+pub fn with_underline_color(s: Style, c: Color) -> Style {
+  Style(..s, underline_color: c)
+}
+
 /// Default colors with bold modifier.
 pub fn bold_style() -> Style {
-  Style(fg: Default, bg: Default, modifier: bold(), sub_modifier: none())
+  new(Default, Default, bold())
 }
 
 /// Default colors with reverse modifier (swap fg/bg).
 pub fn reversed() -> Style {
-  Style(fg: Default, bg: Default, modifier: reverse(), sub_modifier: none())
+  new(Default, Default, reverse())
 }
 
 /// Default colors with italic modifier.
 pub fn italic_style() -> Style {
-  Style(fg: Default, bg: Default, modifier: italic(), sub_modifier: none())
+  new(Default, Default, italic())
 }
 
 /// Default colors with dim modifier.
 pub fn dim_style() -> Style {
-  Style(fg: Default, bg: Default, modifier: dim(), sub_modifier: none())
+  new(Default, Default, dim())
 }
 
 /// Default colors with underline modifier.
 pub fn underline_style() -> Style {
-  Style(fg: Default, bg: Default, modifier: underline(), sub_modifier: none())
+  new(Default, Default, underline())
 }
 
 /// Turn modifiers on. Anything named here stops being turned off.
@@ -261,9 +299,14 @@ pub fn patch(base: Style, over: Style) -> Style {
     Default -> base.bg
     c -> c
   }
+  let underline_color = case over.underline_color {
+    Default -> base.underline_color
+    c -> c
+  }
   Style(
     fg: fg,
     bg: bg,
+    underline_color: underline_color,
     modifier: base.modifier
       |> remove(over.sub_modifier)
       |> add(over.modifier),
@@ -337,6 +380,45 @@ pub fn ansi_bg(color: Color) -> String {
       <> ";"
       <> int.to_string(b)
       <> "m"
+  }
+}
+
+/// Underline colour escape sequence (SGR 58).
+///
+/// `Default` emits nothing rather than SGR 59: a cell is always written after
+/// a reset, so there is no stale underline colour to clear.
+pub fn ansi_underline_color(color: Color) -> String {
+  case color {
+    Default -> ""
+    // No 16-colour short form exists for the underline, unlike fg and bg:
+    // SGR 58 only takes the 5 (indexed) and 2 (rgb) forms.
+    Indexed(n) -> "\u{001B}[58;5;" <> int.to_string(n) <> "m"
+    Rgb(r, g, b) ->
+      "\u{001B}[58;2;"
+      <> int.to_string(r)
+      <> ";"
+      <> int.to_string(g)
+      <> ";"
+      <> int.to_string(b)
+      <> "m"
+  }
+}
+
+/// Settle a style into what a cell actually shows: modifiers it turns off win
+/// over modifiers it turns on, and `sub_modifier` is spent.
+///
+/// Cells hold resolved styles. Two cells that look identical must compare
+/// equal, or the diff repaints them every frame; an unspent `sub_modifier`
+/// riding along on a cell would break exactly that.
+pub fn resolve(s: Style) -> Style {
+  case is_none(s.sub_modifier) {
+    True -> s
+    False ->
+      Style(
+        ..s,
+        modifier: remove(s.modifier, s.sub_modifier),
+        sub_modifier: none(),
+      )
   }
 }
 

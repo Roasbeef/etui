@@ -37,18 +37,8 @@ pub type MultiSelectState {
 pub fn multi_select_new(items: List(String)) -> MultiSelectWidget {
   MultiSelectWidget(
     items: items,
-    cursor_style: style.Style(
-      fg: style.Default,
-      bg: style.Default,
-      modifier: style.reverse(),
-      sub_modifier: style.none(),
-    ),
-    selected_style: style.Style(
-      fg: style.Default,
-      bg: style.Default,
-      modifier: style.bold(),
-      sub_modifier: style.none(),
-    ),
+    cursor_style: style.new(style.Default, style.Default, style.reverse()),
+    selected_style: style.new(style.Default, style.Default, style.bold()),
     checked_mark: "[x] ",
     unchecked_mark: "[ ] ",
     cursor_mark: "▶ ",
@@ -233,9 +223,7 @@ fn render_rows(
               buf,
               geometry.Position(x: area.position.x, y: y),
               padded,
-              fg,
-              bg,
-              modifier,
+              style.new(fg, bg, modifier),
             )
           render_rows(buf2, area, w, state, offset, row_off + 1)
         }

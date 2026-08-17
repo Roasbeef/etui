@@ -85,9 +85,7 @@ pub fn render(
             buf,
             area.position,
             line,
-            fs.fg,
-            fs.bg,
-            style.none(),
+            style.new(fs.fg, fs.bg, style.none()),
           )
         }
         _ -> {
@@ -109,18 +107,14 @@ pub fn render(
               buf,
               area.position,
               left,
-              fs.fg,
-              fs.bg,
-              style.none(),
+              style.new(fs.fg, fs.bg, style.none()),
             )
           let buf3 =
             buffer.set_string(
               buf2,
               geometry.Position(x: area.position.x + left_n, y: area.position.y),
               " " <> fs.title <> " ",
-              fs.title_fg,
-              fs.bg,
-              style.bold(),
+              style.new(fs.title_fg, fs.bg, style.bold()),
             )
           buffer.set_string(
             buf3,
@@ -129,9 +123,7 @@ pub fn render(
               y: area.position.y,
             ),
             right,
-            fs.fg,
-            fs.bg,
-            style.none(),
+            style.new(fs.fg, fs.bg, style.none()),
           )
         }
       }

@@ -205,7 +205,8 @@ fn render_row_cells(
         }
         False -> #(g.empty_char, style.Default)
       }
-      let buf2 = buffer.set_string(buf, pos, sym, fg, g.bg, g.modifier)
+      let buf2 =
+        buffer.set_string(buf, pos, sym, style.new(fg, g.bg, g.modifier))
       render_row_cells(buf2, area, g, frame, width, fill_width, x + 1, y)
     }
   }

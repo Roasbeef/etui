@@ -53,14 +53,33 @@ style.has(m, style.bold())  // True
 ## Style record
 
 ```gleam
-let s = style.Style(
-  fg: style.Rgb(255, 255, 255),
-  bg: style.Indexed(4),
-  modifier: style.add(style.bold(), style.italic()),
+let s = style.new(
+  style.Rgb(255, 255, 255),
+  style.Indexed(4),
+  style.add(style.bold(), style.italic()),
 )
 ```
 
+`style.new` fills in the two fields a call site rarely sets: `sub_modifier`
+(empty) and `underline_color` (`Default`, so the underline takes the text
+colour). Set them with `style.remove_modifier` and `style.with_underline_color`.
+
 Most widgets accept style via `with_style(s)`.
+
+## Underline colour
+
+The underline can be a different colour from the text under it, which is what
+a spell checker or a diagnostic squiggle wants:
+
+```gleam
+let squiggle =
+  style.underline_style()
+  |> style.with_underline_color(style.Rgb(220, 60, 60))
+```
+
+This emits SGR 58. Terminals that implement it (kitty, VTE, WezTerm, iTerm2)
+draw the underline in that colour; the rest ignore the sequence and draw it in
+the foreground colour, as they did before 2.0.
 
 ## ANSI output
 
@@ -69,6 +88,7 @@ style.ansi_fg(style.Rgb(255, 0, 0))    // "\e[38;2;255;0;0m"
 style.ansi_fg(style.Indexed(1))        // "\e[31m"
 style.ansi_fg(style.Indexed(200))      // "\e[38;5;200m"
 style.ansi_bg(style.Indexed(4))        // "\e[44m"
+style.ansi_underline_color(style.Indexed(2))  // "\e[58;5;2m"
 style.ansi_reset()                      // "\e[0m"
 ```
 
@@ -83,10 +103,10 @@ import etui/span
 let s1 = span.span_plain("normal text")
 
 // Styled span
-let s2 = span.span_styled("bold red", style.Style(
-  fg: style.Indexed(1),
-  bg: style.Default,
-  modifier: style.bold(),
+let s2 = span.span_styled("bold red", style.new(
+  style.Indexed(1),
+  style.Default,
+  style.bold(),
 ))
 
 // Assemble a line

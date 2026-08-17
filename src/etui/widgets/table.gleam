@@ -60,12 +60,7 @@ pub fn table_new(rows: List(List(String))) -> TableWidget {
     show_header: False,
     fg: style.Default,
     bg: style.Default,
-    highlight_style: style.Style(
-      fg: style.Default,
-      bg: style.Default,
-      modifier: style.reverse(),
-      sub_modifier: style.none(),
-    ),
+    highlight_style: style.new(style.Default, style.Default, style.reverse()),
     blink_period: 0,
   )
 }
@@ -280,9 +275,7 @@ fn do_render(
           buf,
           geometry.Position(x: area.position.x, y: y),
           row_line,
-          row_fg,
-          row_bg,
-          row_modifier,
+          style.new(row_fg, row_bg, row_modifier),
         )
       do_render(buf_new, area, t, selected, offset, y_offset + 1)
     }

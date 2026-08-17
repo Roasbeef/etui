@@ -662,11 +662,10 @@ fn render_list(m: Model) -> buffer.Buffer {
 
   let pkg_lw =
     list_w.list_new_styled(pkg_list_items())
-    |> list_w.with_highlight_style(style.Style(
-      fg: c_cyan,
-      bg: style.Indexed(235),
-      modifier: style.none(),
-      sub_modifier: style.none(),
+    |> list_w.with_highlight_style(style.new(
+      c_cyan,
+      style.Indexed(235),
+      style.none(),
     ))
   let buf = list_w.render_stateful(buf, list_inner, pkg_lw, m.pkg_list_st)
 
@@ -712,11 +711,10 @@ fn render_list(m: Model) -> buffer.Buffer {
     table.table_new(pkg_table_rows())
     |> table.with_col_widths(col_w)
     |> table.with_header(True)
-    |> table.with_highlight_style(style.Style(
-      fg: c_cyan,
-      bg: style.Indexed(235),
-      modifier: style.none(),
-      sub_modifier: style.none(),
+    |> table.with_highlight_style(style.new(
+      c_cyan,
+      style.Indexed(235),
+      style.none(),
     ))
   let buf = table.render_stateful(buf, tbl_inner, tbl, m.pkg_table_st)
 
@@ -758,11 +756,10 @@ fn render_tree(m: Model) -> buffer.Buffer {
   let tw =
     m.tree_widget
     |> tree.with_colors(c_dcyan, style.Default)
-    |> tree.with_highlight_style(style.Style(
-      fg: c_cyan,
-      bg: style.Indexed(235),
-      modifier: style.none(),
-      sub_modifier: style.none(),
+    |> tree.with_highlight_style(style.new(
+      c_cyan,
+      style.Indexed(235),
+      style.none(),
     ))
   let buf = tree.render(buf, tree_inner, tw, m.tree_st)
 
@@ -1035,11 +1032,10 @@ fn draw_dialog(buf: buffer.Buffer, m: Model) -> buffer.Buffer {
         |> dlg_w.with_labels("  QUIT  ", " CANCEL ")
         |> dlg_w.with_border(block.Rounded)
         |> dlg_w.with_colors(c_cyan, style.Default)
-        |> dlg_w.with_focused_style(style.Style(
-          fg: style.Default,
-          bg: style.Indexed(235),
-          modifier: style.bold(),
-          sub_modifier: style.none(),
+        |> dlg_w.with_focused_style(style.new(
+          style.Default,
+          style.Indexed(235),
+          style.bold(),
         ))
       dlg_w.render(buf, screen, d, m.dlg_st)
     }

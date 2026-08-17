@@ -91,9 +91,7 @@ pub fn render(
             buf,
             geometry.Position(x: area.position.x, y: area.position.y),
             line,
-            m.fg,
-            m.bg,
-            m.modifier,
+            style.new(m.fg, m.bg, m.modifier),
           )
         }
       }

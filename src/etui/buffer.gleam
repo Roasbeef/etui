@@ -63,24 +63,12 @@ fn fill_all_rows_ffi(
   width: Int,
   height: Int,
   str: String,
-  fg: style.Color,
-  bg: style.Color,
-  modifier: style.Modifier,
+  s: style.Style,
   link: String,
   default: Cell,
 ) -> CellArray {
   let size = int.max(width * height, 0)
-  fill_all_rows_gleam(
-    array_new(size, default),
-    0,
-    height,
-    width,
-    str,
-    fg,
-    bg,
-    modifier,
-    link,
-  )
+  fill_all_rows_gleam(array_new(size, default), 0, height, width, str, s, link)
 }
 
 fn fill_all_rows_gleam(
@@ -89,9 +77,7 @@ fn fill_all_rows_gleam(
   height: Int,
   width: Int,
   str: String,
-  fg: style.Color,
-  bg: style.Color,
-  modifier: style.Modifier,
+  s: style.Style,
   link: String,
 ) -> CellArray {
   case row >= height {
@@ -104,22 +90,10 @@ fn fill_all_rows_gleam(
           start,
           start + width,
           string.to_graphemes(str),
-          fg,
-          bg,
-          modifier,
+          s,
           link,
         )
-      fill_all_rows_gleam(
-        arr2,
-        row + 1,
-        height,
-        width,
-        str,
-        fg,
-        bg,
-        modifier,
-        link,
-      )
+      fill_all_rows_gleam(arr2, row + 1, height, width, str, s, link)
     }
   }
 }
@@ -133,21 +107,10 @@ fn fill_string_ffi(
   start_idx: Int,
   max_idx: Int,
   str: String,
-  fg: style.Color,
-  bg: style.Color,
-  modifier: style.Modifier,
+  s: style.Style,
   link: String,
 ) -> CellArray {
-  fill_graphemes(
-    arr,
-    start_idx,
-    max_idx,
-    string.to_graphemes(str),
-    fg,
-    bg,
-    modifier,
-    link,
-  )
+  fill_graphemes(arr, start_idx, max_idx, string.to_graphemes(str), s, link)
 }
 
 fn fill_graphemes(
@@ -155,12 +118,10 @@ fn fill_graphemes(
   idx: Int,
   max_idx: Int,
   gs: List(String),
-  fg: style.Color,
-  bg: style.Color,
-  modifier: style.Modifier,
+  s: style.Style,
   link: String,
 ) -> CellArray {
-  commit(fill_draft(draft(arr), idx, max_idx, gs, fg, bg, modifier, link))
+  commit(fill_draft(draft(arr), idx, max_idx, gs, s, link))
 }
 
 fn fill_draft(
@@ -168,9 +129,7 @@ fn fill_draft(
   idx: Int,
   max_idx: Int,
   gs: List(String),
-  fg: style.Color,
-  bg: style.Color,
-  modifier: style.Modifier,
+  s: style.Style,
   link: String,
 ) -> Draft {
   case idx >= max_idx {
@@ -181,32 +140,24 @@ fn fill_draft(
         [g, ..rest] -> {
           let w = text.grapheme_cell_width(g)
           let cell =
-            Cell(
-              content: Content(symbol: g, width: w),
-              fg: fg,
-              bg: bg,
-              modifier: modifier,
-              link: link,
-            )
+            Cell(content: Content(symbol: g, width: w), style: s, link: link)
           case w >= 2 {
             // A wide grapheme needs two columns. With only one left before
             // max_idx, leave the cell blank: writing the glyph anyway made it
             // overflow the clip boundary and shift everything to its right.
             True if idx + 1 >= max_idx ->
-              fill_draft(arr, idx + 1, max_idx, rest, fg, bg, modifier, link)
+              fill_draft(arr, idx + 1, max_idx, rest, s, link)
             True ->
               fill_draft(
                 draft_set(
                   idx + 1,
-                  continuation_cell(fg, bg, modifier),
+                  continuation_cell(s),
                   draft_set(idx, cell, arr),
                 ),
                 idx + 2,
                 max_idx,
                 rest,
-                fg,
-                bg,
-                modifier,
+                s,
                 link,
               )
             False ->
@@ -215,9 +166,7 @@ fn fill_draft(
                 idx + 1,
                 max_idx,
                 rest,
-                fg,
-                bg,
-                modifier,
+                s,
                 link,
               )
           }
@@ -237,13 +186,15 @@ pub type CellContent {
   Continuation
 }
 
-/// One cell in the terminal grid: a grapheme + colors + modifiers + optional hyperlink.
+/// One cell in the terminal grid: a grapheme + its style + optional hyperlink.
+///
+/// The style is resolved (see `style.resolve`): whatever it turns off has
+/// already been taken off, so two cells that look the same compare equal and
+/// the diff leaves them alone.
 pub type Cell {
   Cell(
     content: CellContent,
-    fg: style.Color,
-    bg: style.Color,
-    modifier: style.Modifier,
+    style: style.Style,
     /// OSC 8 hyperlink URI. Empty string = no link. Emitted on render.
     link: String,
   )
@@ -284,19 +235,29 @@ pub fn cell_symbol(cell: Cell) -> String {
   }
 }
 
+/// Whole style of a cell.
+pub fn cell_style(cell: Cell) -> style.Style {
+  cell.style
+}
+
 /// Foreground color of a cell.
 pub fn cell_fg(cell: Cell) -> style.Color {
-  cell.fg
+  cell.style.fg
 }
 
 /// Background color of a cell.
 pub fn cell_bg(cell: Cell) -> style.Color {
-  cell.bg
+  cell.style.bg
 }
 
 /// Text modifier of a cell.
 pub fn cell_modifier(cell: Cell) -> style.Modifier {
-  cell.modifier
+  cell.style.modifier
+}
+
+/// Underline color of a cell.
+pub fn cell_underline_color(cell: Cell) -> style.Color {
+  cell.style.underline_color
 }
 
 /// True if this cell is the second column of a wide grapheme (never rendered directly).
@@ -314,20 +275,14 @@ pub fn is_continuation(cell: Cell) -> Bool {
 pub fn empty_cell() -> Cell {
   Cell(
     content: Content(symbol: " ", width: 1),
-    fg: style.Default,
-    bg: style.Default,
-    modifier: style.none(),
+    style: style.default_style(),
     link: "",
   )
 }
 
 /// Continuation cell (second column of a wide grapheme).
-pub fn continuation_cell(
-  fg: style.Color,
-  bg: style.Color,
-  modifier: style.Modifier,
-) -> Cell {
-  Cell(content: Continuation, fg: fg, bg: bg, modifier: modifier, link: "")
+pub fn continuation_cell(s: style.Style) -> Cell {
+  Cell(content: Continuation, style: s, link: "")
 }
 
 /// Accessor: OSC 8 hyperlink URI of a cell (empty = no link).
@@ -347,9 +302,7 @@ pub fn buffer_new(area: geometry.Rect) -> Buffer {
 pub fn buffer_new_filled(
   area: geometry.Rect,
   row_text: String,
-  fg: style.Color,
-  bg: style.Color,
-  modifier: style.Modifier,
+  s: style.Style,
 ) -> Buffer {
   let default = empty_cell()
   Buffer(
@@ -358,9 +311,7 @@ pub fn buffer_new_filled(
       area.size.width,
       area.size.height,
       row_text,
-      fg,
-      bg,
-      modifier,
+      style.resolve(s),
       "",
       default,
     ),
@@ -403,11 +354,9 @@ pub fn set_string(
   buffer: Buffer,
   pos: geometry.Position,
   str: String,
-  fg: style.Color,
-  bg: style.Color,
-  modifier: style.Modifier,
+  s: style.Style,
 ) -> Buffer {
-  set_string_linked(buffer, pos, str, fg, bg, modifier, "")
+  set_string_linked(buffer, pos, str, s, "")
 }
 
 /// Set cells from a string with an OSC 8 hyperlink URI.
@@ -416,9 +365,7 @@ pub fn set_string_linked(
   buffer: Buffer,
   pos: geometry.Position,
   str: String,
-  fg: style.Color,
-  bg: style.Color,
-  modifier: style.Modifier,
+  s: style.Style,
   link: String,
 ) -> Buffer {
   case geometry.contains(buffer.area, pos) {
@@ -435,9 +382,7 @@ pub fn set_string_linked(
           start_idx,
           row_end,
           str,
-          fg,
-          bg,
-          modifier,
+          style.resolve(s),
           link,
         ),
       )
@@ -625,7 +570,7 @@ pub fn set_style(
           buffer.area,
           draft(buffer.cells),
           r,
-          s,
+          style.resolve(s),
           r.position.y,
         )),
       )
@@ -655,7 +600,7 @@ fn style_row(cells: Draft, s: style.Style, idx: Int, idx_max: Int) -> Draft {
     True -> cells
     False -> {
       let cell = draft_get(idx, cells)
-      let restyled = Cell(..cell, fg: s.fg, bg: s.bg, modifier: s.modifier)
+      let restyled = Cell(..cell, style: s)
       style_row(draft_set(idx, restyled, cells), s, idx + 1, idx_max)
     }
   }
@@ -784,10 +729,16 @@ fn collect_run(
   }
 }
 
-// Structural `==` compares every field in one BEAM term-comparison BIF,
-// faster than a hand-rolled check in the per-cell diff loop.
+// Content first, then the style, rather than one `==` on the whole cell.
+// On BEAM the two are equivalent. On JavaScript structural equality walks a
+// record generically, and a Cell now holds a Style rather than three loose
+// fields, so a whole-cell `==` walked one level deeper on every cell and made
+// a full 200x50 repaint 1.7x slower. Comparing the content first settles a
+// repaint on the field that actually differs, and comparing the styles as
+// whole values keeps the identical-reference fast path that a steady frame
+// hits on every cell.
 fn cells_equal(a: Cell, b: Cell) -> Bool {
-  a == b
+  a.content == b.content && a.link == b.link && a.style == b.style
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -799,27 +750,18 @@ fn cells_equal(a: Cell, b: Cell) -> Bool {
 // cursor moves, so we can thread this state across rows and patches.
 
 type RunStyle {
-  RunStyle(
-    fg: style.Color,
-    bg: style.Color,
-    modifier: style.Modifier,
-    link: String,
-  )
+  RunStyle(style: style.Style, link: String)
 }
 
 fn blank_run_style() -> RunStyle {
-  RunStyle(
-    fg: style.Default,
-    bg: style.Default,
-    modifier: style.none(),
-    link: "",
-  )
+  RunStyle(style: style.default_style(), link: "")
 }
 
 fn run_style_active(rs: RunStyle) -> Bool {
-  style.ansi_fg(rs.fg) != ""
-  || style.ansi_bg(rs.bg) != ""
-  || style.ansi_modifier(rs.modifier) != ""
+  style.ansi_fg(rs.style.fg) != ""
+  || style.ansi_bg(rs.style.bg) != ""
+  || style.ansi_modifier(rs.style.modifier) != ""
+  || style.ansi_underline_color(rs.style.underline_color) != ""
   || rs.link != ""
 }
 
@@ -830,11 +772,7 @@ fn emit_cell(rs: RunStyle, cell: Cell) -> #(String, RunStyle) {
   case is_continuation(cell) {
     True -> #("", rs)
     False -> {
-      let same =
-        cell.fg == rs.fg
-        && cell.bg == rs.bg
-        && cell.modifier == rs.modifier
-        && cell.link == rs.link
+      let same = cell.link == rs.link && cell.style == rs.style
       case same {
         True -> #(cell_symbol(cell), rs)
         False -> {
@@ -846,26 +784,22 @@ fn emit_cell(rs: RunStyle, cell: Cell) -> #(String, RunStyle) {
             True -> style.ansi_reset()
             False -> ""
           }
-          let fg_seq = style.ansi_fg(cell.fg)
-          let bg_seq = style.ansi_bg(cell.bg)
-          let mod_seq = style.ansi_modifier(cell.modifier)
+          let fg_seq = style.ansi_fg(cell.style.fg)
+          let bg_seq = style.ansi_bg(cell.style.bg)
+          let mod_seq = style.ansi_modifier(cell.style.modifier)
+          let ul_seq = style.ansi_underline_color(cell.style.underline_color)
           let link_open = case cell.link {
             "" -> ""
             uri -> osc8_open(uri)
           }
-          let new_rs =
-            RunStyle(
-              fg: cell.fg,
-              bg: cell.bg,
-              modifier: cell.modifier,
-              link: cell.link,
-            )
+          let new_rs = RunStyle(style: cell.style, link: cell.link)
           #(
             link_close
               <> reset_seq
               <> fg_seq
               <> bg_seq
               <> mod_seq
+              <> ul_seq
               <> link_open
               <> cell_symbol(cell),
             new_rs,

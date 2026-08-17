@@ -27,9 +27,7 @@ import gleam/string
 pub type Span {
   Span(
     content: String,
-    fg: style.Color,
-    bg: style.Color,
-    modifier: style.Modifier,
+    style: style.Style,
     /// OSC 8 hyperlink URI. Empty string = no link.
     link: String,
   )
@@ -55,18 +53,12 @@ pub type Text {
 
 /// Span with default terminal colors and no modifier.
 pub fn span_plain(content: String) -> Span {
-  Span(
-    content: content,
-    fg: style.Default,
-    bg: style.Default,
-    modifier: style.none(),
-    link: "",
-  )
+  Span(content: content, style: style.default_style(), link: "")
 }
 
 /// Span with explicit style applied.
 pub fn span_styled(content: String, s: style.Style) -> Span {
-  Span(content: content, fg: s.fg, bg: s.bg, modifier: s.modifier, link: "")
+  Span(content: content, style: s, link: "")
 }
 
 /// Span with an OSC 8 clickable hyperlink.
@@ -77,13 +69,7 @@ pub fn span_styled(content: String, s: style.Style) -> Span {
 /// span.span_link("docs.gleam.run", "https://docs.gleam.run")
 /// ```
 pub fn span_link(content: String, uri: String) -> Span {
-  Span(
-    content: content,
-    fg: style.Default,
-    bg: style.Default,
-    modifier: style.none(),
-    link: uri,
-  )
+  Span(content: content, style: style.default_style(), link: uri)
 }
 
 /// Add an OSC 8 hyperlink URI to an existing span.
@@ -93,17 +79,22 @@ pub fn with_link(sp: Span, uri: String) -> Span {
 
 /// Set foreground color on a span.
 pub fn span_fg(sp: Span, color: style.Color) -> Span {
-  Span(..sp, fg: color)
+  Span(..sp, style: style.with_fg(sp.style, color))
 }
 
 /// Set background color on a span.
 pub fn span_bg(sp: Span, color: style.Color) -> Span {
-  Span(..sp, bg: color)
+  Span(..sp, style: style.with_bg(sp.style, color))
 }
 
 /// Add a modifier to a span.
 pub fn span_modifier(sp: Span, modifier: style.Modifier) -> Span {
-  Span(..sp, modifier: style.add(sp.modifier, modifier))
+  Span(..sp, style: style.add_modifier(sp.style, modifier))
+}
+
+/// Colour the underline of a span independently of its text.
+pub fn span_underline_color(sp: Span, color: style.Color) -> Span {
+  Span(..sp, style: style.with_underline_color(sp.style, color))
 }
 
 /// Total cell width of a span.
@@ -130,9 +121,7 @@ pub fn line_aligned(spans: List(Span), alignment: text.Alignment) -> Line {
 pub fn span_bold(content: String) -> Span {
   Span(
     content: content,
-    fg: style.Default,
-    bg: style.Default,
-    modifier: style.bold(),
+    style: style.new(style.Default, style.Default, style.bold()),
     link: "",
   )
 }
@@ -141,9 +130,7 @@ pub fn span_bold(content: String) -> Span {
 pub fn span_italic(content: String) -> Span {
   Span(
     content: content,
-    fg: style.Default,
-    bg: style.Default,
-    modifier: style.italic(),
+    style: style.new(style.Default, style.Default, style.italic()),
     link: "",
   )
 }
@@ -152,9 +139,7 @@ pub fn span_italic(content: String) -> Span {
 pub fn span_dim(content: String) -> Span {
   Span(
     content: content,
-    fg: style.Default,
-    bg: style.Default,
-    modifier: style.dim(),
+    style: style.new(style.Default, style.Default, style.dim()),
     link: "",
   )
 }
@@ -163,9 +148,7 @@ pub fn span_dim(content: String) -> Span {
 pub fn span_underline(content: String) -> Span {
   Span(
     content: content,
-    fg: style.Default,
-    bg: style.Default,
-    modifier: style.underline(),
+    style: style.new(style.Default, style.Default, style.underline()),
     link: "",
   )
 }
@@ -224,9 +207,7 @@ fn render_spans(
               buf,
               geometry.Position(x: x, y: pos.y),
               content,
-              sp.fg,
-              sp.bg,
-              sp.modifier,
+              sp.style,
               sp.link,
             )
           render_spans(buf2, pos, rest, x + w, x_end)
@@ -499,7 +480,7 @@ fn push(current: List(Span), content: String, proto: Span) -> List(Span) {
 }
 
 fn same_style(a: Span, b: Span) -> Bool {
-  a.fg == b.fg && a.bg == b.bg && a.modifier == b.modifier && a.link == b.link
+  a.style == b.style && a.link == b.link
 }
 
 // Take as many graphemes as fit in `budget` cells.
