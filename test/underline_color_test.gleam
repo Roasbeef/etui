@@ -21,19 +21,19 @@ fn rect(w: Int, h: Int) -> Rect {
 
 pub fn ansi_underline_color_indexed_test() {
   style.ansi_underline_color(style.Indexed(9))
-  |> should.equal("\u{001B}[58;5;9m")
+  |> should.equal("\u{001B}[58:5:9m")
 }
 
 /// The low 16 colours have no short form here, unlike fg (30-37) and bg
-/// (40-47): SGR 58 only takes the 5 and 2 subforms. Indexed(1) is 58;5;1.
+/// (40-47): SGR 58 only takes the 5 and 2 subforms. Indexed(1) is 58:5:1.
 pub fn ansi_underline_color_low_index_has_no_short_form_test() {
   style.ansi_underline_color(style.Indexed(1))
-  |> should.equal("\u{001B}[58;5;1m")
+  |> should.equal("\u{001B}[58:5:1m")
 }
 
 pub fn ansi_underline_color_rgb_test() {
   style.ansi_underline_color(style.Rgb(255, 85, 85))
-  |> should.equal("\u{001B}[58;2;255;85;85m")
+  |> should.equal("\u{001B}[58:2::255:85:85m")
 }
 
 /// Default emits nothing rather than SGR 59: every cell is written after a
@@ -67,7 +67,7 @@ pub fn rendered_frame_carries_the_sequence_test() {
     |> buffer.set_string(Position(0, 0), "typo", s)
     |> buffer.to_ansi
 
-  string.contains(out, "\u{001B}[58;5;9m") |> should.equal(True)
+  string.contains(out, "\u{001B}[58:5:9m") |> should.equal(True)
 }
 
 /// A run of identically styled cells pays for the sequence once. Emitting it
@@ -81,7 +81,7 @@ pub fn sequence_is_emitted_once_per_run_test() {
     |> buffer.set_string(Position(0, 0), "typo", s)
     |> buffer.to_ansi
 
-  string.split(out, "\u{001B}[58;5;9m")
+  string.split(out, "\u{001B}[58:5:9m")
   |> list.length
   |> should.equal(2)
 }
@@ -346,7 +346,7 @@ pub fn leaving_a_colored_underline_resets_test() {
     |> buffer.set_string(Position(2, 0), "cd", style.default_style())
     |> buffer.to_ansi
 
-  string.contains(out, "\u{001B}[58;5;9m") |> should.equal(True)
+  string.contains(out, "\u{001B}[58:5:9m") |> should.equal(True)
   string.contains(out, style.ansi_reset()) |> should.equal(True)
 }
 
@@ -366,8 +366,8 @@ pub fn adjacent_colors_both_appear_test() {
     )
     |> buffer.to_ansi
 
-  string.contains(out, "\u{001B}[58;5;1m") |> should.equal(True)
-  string.contains(out, "\u{001B}[58;5;2m") |> should.equal(True)
+  string.contains(out, "\u{001B}[58:5:1m") |> should.equal(True)
+  string.contains(out, "\u{001B}[58:5:2m") |> should.equal(True)
 }
 
 /// A hyperlink and a coloured underline on the same cell: both sequences, and
@@ -381,7 +381,7 @@ pub fn link_and_underline_color_coexist_test() {
     |> buffer.set_string_linked(Position(0, 0), "docs", s, "https://gleam.run")
     |> buffer.to_ansi
 
-  string.contains(out, "\u{001B}[58;5;4m") |> should.equal(True)
+  string.contains(out, "\u{001B}[58:5:4m") |> should.equal(True)
   string.contains(out, "https://gleam.run") |> should.equal(True)
 }
 
@@ -446,4 +446,57 @@ pub fn one_field_apart_is_not_equal_test() {
     )
 
   buffer.diff(a, b) |> list.length |> should.equal(1)
+}
+
+// ─────────────────────────────────────────────────────────────────
+// What a terminal that does not know SGR 58 sees
+//
+// This is the bug the first version shipped with. `ESC[58;5;9m` is three
+// ordinary parameters to a terminal that does not implement 58: unknown,
+// then 5, then 9. macOS Terminal read it as blink plus strikethrough, and
+// `58;5;2` — a green underline — as blink plus dim. The colon form makes the
+// 5 and the 9 sub-parameters of the 58, so the whole attribute is skipped
+// together.
+
+/// No semicolon may appear between 58 and its arguments. That is the entire
+/// difference between "ignored" and "the text now blinks".
+pub fn the_sequence_uses_no_semicolons_test() {
+  string.contains(style.ansi_underline_color(style.Indexed(9)), ";")
+  |> should.equal(False)
+  string.contains(style.ansi_underline_color(style.Rgb(1, 2, 3)), ";")
+  |> should.equal(False)
+}
+
+/// Spelled out: none of the parameters an old terminal would act on can be
+/// left where it would act on them.
+pub fn no_parameter_can_be_mistaken_for_another_attribute_test() {
+  let blink_or_worse = ["\u{001B}[5m", "\u{001B}[9m", "\u{001B}[2m"]
+  let seqs = [
+    style.ansi_underline_color(style.Indexed(9)),
+    style.ansi_underline_color(style.Indexed(2)),
+    style.ansi_underline_color(style.Rgb(220, 60, 60)),
+  ]
+
+  list.each(seqs, fn(seq) {
+    list.each(blink_or_worse, fn(bad) {
+      #(seq, bad, string.contains(seq, bad)) |> should.equal(#(seq, bad, False))
+    })
+  })
+}
+
+/// A frame carrying a coloured underline must not carry a blink either.
+pub fn a_rendered_frame_asks_for_no_blink_test() {
+  let s =
+    style.new(style.Default, style.Default, style.underline())
+    |> style.with_underline_color(style.Indexed(2))
+  let out =
+    buffer.buffer_new(rect(4, 1))
+    |> buffer.set_string(Position(0, 0), "typo", s)
+    |> buffer.to_ansi
+
+  // SGR 4 is asked for; 5, 2 and 9 are not.
+  string.contains(out, "\u{001B}[4m") |> should.equal(True)
+  string.contains(out, "\u{001B}[5m") |> should.equal(False)
+  string.contains(out, "\u{001B}[2m") |> should.equal(False)
+  string.contains(out, "\u{001B}[9m") |> should.equal(False)
 }

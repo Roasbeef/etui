@@ -84,9 +84,15 @@ span.span_styled("recieve", style.underline_style())
 |> span.span_underline_color(style.Rgb(220, 60, 60))
 ```
 
-This emits SGR 58. Terminals that implement it (kitty, VTE, WezTerm, iTerm2)
-draw the underline in that colour; the rest ignore the sequence and draw it in
-the foreground colour, as they did before 2.0.
+This emits SGR 58, colon-separated. Terminals that implement it (kitty, VTE,
+WezTerm, iTerm2) draw the underline in that colour; the rest ignore the
+sequence and draw the underline in the foreground colour, as before 2.0.
+
+The colons are what makes ignoring it safe. Written with semicolons,
+`ESC[58;5;9m` is three ordinary parameters to a terminal that does not know
+58 — unknown, then 5, then 9 — so a red underline came out as blinking
+struck-through text, and a green one (`58;5;2`) as blinking dim text. After a
+colon the values belong to the 58, so the whole attribute is skipped together.
 
 ## ANSI output
 
@@ -95,7 +101,8 @@ style.ansi_fg(style.Rgb(255, 0, 0))    // "\e[38;2;255;0;0m"
 style.ansi_fg(style.Indexed(1))        // "\e[31m"
 style.ansi_fg(style.Indexed(200))      // "\e[38;5;200m"
 style.ansi_bg(style.Indexed(4))        // "\e[44m"
-style.ansi_underline_color(style.Indexed(2))  // "\e[58;5;2m"
+style.ansi_underline_color(style.Indexed(2))  // "\e[58:5:2m"
+style.ansi_underline_color(style.Rgb(220, 60, 60))  // "\e[58:2::220:60:60m"
 style.ansi_reset()                      // "\e[0m"
 ```
 

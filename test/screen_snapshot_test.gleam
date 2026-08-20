@@ -331,11 +331,11 @@ pub fn the_underline_screen_labels_stay_uncoloured_test() {
 /// of this.
 pub fn the_underline_screen_emits_sgr_58_test() {
   let under = buffer.to_ansi(lab_frame("6", 80, 24))
-  string.contains(under, "\u{001B}[58;5;9m") |> should.equal(True)
-  string.contains(under, "\u{001B}[58;5;2m") |> should.equal(True)
+  string.contains(under, "\u{001B}[58:5:9m") |> should.equal(True)
+  string.contains(under, "\u{001B}[58:5:2m") |> should.equal(True)
 
   let styles = buffer.to_ansi(lab_frame("2", 80, 24))
-  string.contains(styles, "58;") |> should.equal(False)
+  string.contains(styles, "58:") |> should.equal(False)
 }
 
 pub fn the_text_screen_carries_the_squiggle_through_a_reflow_test() {

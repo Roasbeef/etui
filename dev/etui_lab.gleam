@@ -461,9 +461,14 @@ fn sample_row(
   sample: String,
   expect: String,
 ) -> buffer.Buffer {
+  // The sample is styled, the padding after it is not. Padding inside the
+  // styled span put the modifier on the spaces too, and a modifier that draws
+  // — underline, strikethrough — then ran on past the word it belonged to.
+  let gap = int.max(1, 26 - text.cell_width(sample))
   line_at(buf, x, y, w, [
     tinted(text.pad_right(name, 16), muted),
-    styled(text.pad_right(sample, 26), st),
+    styled(sample, st),
+    plain(string.repeat(" ", gap)),
     tinted(text.pad_right(sgr(st), 14), style.Indexed(238)),
     plain(expect),
   ])

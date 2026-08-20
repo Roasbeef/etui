@@ -385,6 +385,17 @@ pub fn ansi_bg(color: Color) -> String {
 
 /// Underline colour escape sequence (SGR 58).
 ///
+/// Colon-separated, which is not a style choice. A terminal that does not
+/// implement 58 must be able to ignore the whole thing, and with semicolons
+/// it cannot: `ESC[58;5;9m` reads as three ordinary parameters — 58 unknown,
+/// then 5, then 9 — so asking for a red underline made the text blink and
+/// struck it through, and asking for a green one (`58;5;2`) made it blink and
+/// go dim. Sub-parameters after a colon belong to the parameter they follow,
+/// so `ESC[58:5:9m` is one attribute a terminal either knows or skips.
+///
+/// The empty field in the RGB form is the colour-space id, which T.416 puts
+/// there and every implementation leaves empty.
+///
 /// `Default` emits nothing rather than SGR 59: a cell is always written after
 /// a reset, so there is no stale underline colour to clear.
 pub fn ansi_underline_color(color: Color) -> String {
@@ -392,13 +403,13 @@ pub fn ansi_underline_color(color: Color) -> String {
     Default -> ""
     // No 16-colour short form exists for the underline, unlike fg and bg:
     // SGR 58 only takes the 5 (indexed) and 2 (rgb) forms.
-    Indexed(n) -> "\u{001B}[58;5;" <> int.to_string(n) <> "m"
+    Indexed(n) -> "\u{001B}[58:5:" <> int.to_string(n) <> "m"
     Rgb(r, g, b) ->
-      "\u{001B}[58;2;"
+      "\u{001B}[58:2::"
       <> int.to_string(r)
-      <> ";"
+      <> ":"
       <> int.to_string(g)
-      <> ";"
+      <> ":"
       <> int.to_string(b)
       <> "m"
   }

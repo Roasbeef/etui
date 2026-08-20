@@ -129,6 +129,13 @@ Small, but they will not compile silently:
 - **Status bar sections overwrote each other.** Left, right and centre were
   placed independently, so a narrow bar rendered them on top of one another.
   They now get disjoint spans and truncate instead.
+- **An underline colour made older terminals blink.** SGR 58 was written with
+  semicolons, and to a terminal that does not implement it `ESC[58;5;9m` is
+  three ordinary parameters: unknown, then 5, then 9. macOS Terminal read a red
+  underline as blinking struck-through text and a green one as blinking dim
+  text. The sequence is colon-separated now — `ESC[58:5:9m`,
+  `ESC[58:2::R:G:B` — so the values belong to the 58 and the whole attribute is
+  either understood or skipped.
 - **Cleanup was a bash script, on systems that need not have bash.** The
   watchdog that hands the terminal back when the runtime dies without
   unwinding was `/bin/bash` with `$'\x1b'` ANSI-C quoting. Where /bin holds no
