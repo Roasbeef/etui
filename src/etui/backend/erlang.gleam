@@ -2,11 +2,9 @@
 /// Uses native Erlang modules for terminal control (inspired by Etch).
 import etui/backend.{
   type Error, type InputEvent, type RenderOp, type TerminalSize, ClearScreen,
-  DisableBracketedPaste, DisableMouse, EnableBracketedPaste, EnableMouse,
-  EnterAltScreen, ExitAltScreen, IOError, MoveCursor, Write,
+  EnableBracketedPaste, EnableMouse, EnterAltScreen, IOError, Write,
 }
 import etui/input
-import gleam/int
 import gleam/list
 
 // ─────────────────────────────────────────────────────────────────
@@ -125,8 +123,9 @@ fn read_with_timeout_ffi(timeout_ms: Int) -> Result(String, Nil) {
 }
 
 @external(erlang, "etui_terminal_ffi", "install_sigint_cleanup")
-fn install_sigint_cleanup_ffi(cleanup: fn() -> Nil) -> Nil {
+fn install_sigint_cleanup_ffi(cleanup: fn() -> Nil, restore: String) -> Nil {
   let _ = cleanup
+  let _ = restore
   panic as "etui/backend/erlang requires the Erlang target"
 }
 
@@ -136,7 +135,8 @@ fn uninstall_sigint_cleanup_ffi() -> Nil {
 }
 
 @external(erlang, "etui_terminal_ffi", "write_cleanup")
-fn write_cleanup_ffi() -> Nil {
+fn write_cleanup_ffi(restore: String) -> Nil {
+  let _ = restore
   panic as "etui/backend/erlang requires the Erlang target"
 }
 
@@ -162,7 +162,10 @@ fn init_terminal(opts: backend.Options) -> Result(ErlangTerminalState, Error) {
         Ok(#(c, r)) -> #(c, r)
         Error(_) -> #(80, 24)
       }
-      install_sigint_cleanup_ffi(fn() { terminal_cleanup() })
+      install_sigint_cleanup_ffi(
+        fn() { terminal_cleanup() },
+        backend.restore_sequence(),
+      )
       Ok(ErlangTerminalState(
         raw_mode_active: True,
         cols: cols,
@@ -294,7 +297,7 @@ fn get_terminal_size(
 // reach the terminal while the I/O group leader is still set up correctly.
 fn terminal_cleanup() -> Nil {
   uninstall_sigint_cleanup_ffi()
-  write_cleanup_ffi()
+  write_cleanup_ffi(backend.restore_sequence())
   exit_raw_ffi()
   set_raw_state(False)
   Nil
@@ -310,7 +313,7 @@ fn cleanup_terminal(_state: ErlangTerminalState) -> Nil {
 fn write_ops_to_stdout(ops: List(RenderOp)) -> Result(Nil, String) {
   let output =
     ops
-    |> list.fold("", fn(acc, op) { acc <> render_op_to_string(op) })
+    |> list.fold("", fn(acc, op) { acc <> backend.op_to_ansi(op) })
 
   case output {
     "" -> Ok(Nil)
@@ -318,26 +321,5 @@ fn write_ops_to_stdout(ops: List(RenderOp)) -> Result(Nil, String) {
       write_string(s)
       Ok(Nil)
     }
-  }
-}
-
-fn render_op_to_string(op: RenderOp) -> String {
-  case op {
-    MoveCursor(x, y) ->
-      "\u{001B}[" <> int.to_string(y + 1) <> ";" <> int.to_string(x + 1) <> "H"
-    Write(s) -> s
-    ClearScreen -> "\u{001B}[2J\u{001B}[H"
-    EnterAltScreen -> "\u{001B}[?1049h"
-    ExitAltScreen -> "\u{001B}[?1049l"
-    // Button-event tracking (1002) rather than plain click tracking (1000):
-    // it reports motion while a button is held, which is what makes MouseDrag
-    // possible. 1006 is the SGR encoding, which lifts the 223-column limit.
-    EnableMouse -> "\u{001B}[?1002h\u{001B}[?1006h"
-    // Clear all common xterm mouse/alt-scroll modes so the shell does not
-    // inherit wheel/click reporting after the app exits.
-    DisableMouse ->
-      "\u{001B}[?1007l\u{001B}[?1015l\u{001B}[?1006l\u{001B}[?1005l\u{001B}[?1003l\u{001B}[?1002l\u{001B}[?1000l"
-    EnableBracketedPaste -> "\u{001B}[?2004h"
-    DisableBracketedPaste -> "\u{001B}[?2004l"
   }
 }

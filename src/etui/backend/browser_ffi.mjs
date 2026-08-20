@@ -82,9 +82,17 @@ export function takeResize() {
   return toList([cols, rows]);
 }
 
-export function registerCleanup(cleanupFn) {
+// A browser tab has one way to end, and no signals. `restore` is written
+// after the callback for the same reason as on Node: a throwing callback must
+// not leave the terminal in raw mode.
+let cleanupRegistered = false;
+
+export function registerCleanup(cleanupFn, restore) {
+  if (cleanupRegistered) return;
+  cleanupRegistered = true;
   window.addEventListener("beforeunload", () => {
     try { cleanupFn(); } catch (_) {}
+    try { writeStdout(restore); } catch (_) {}
   });
 }
 

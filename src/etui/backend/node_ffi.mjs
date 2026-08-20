@@ -101,12 +101,33 @@ export function takeResize() {
   return toList([cols, rows]);
 }
 
-export function registerCleanup(cleanupFn) {
+// Hand the terminal back however the process ends.
+//
+// `restore` is the same byte sequence etui/backend defines for every target,
+// passed in rather than spelled out again here. It is written directly, not
+// only through `cleanupFn`: cleanup runs when things have already gone wrong,
+// and a callback that throws must not be the reason the cursor stays hidden.
+//
+// Registration is idempotent. Each `app.run` used to add another set of
+// listeners, and Node warns and then leaks once eleven pile up.
+let cleanupRegistered = false;
+
+export function registerCleanup(cleanupFn, restore) {
+  if (cleanupRegistered) return;
+  cleanupRegistered = true;
+
+  let done = false;
   const handler = () => {
+    if (done) return;
+    done = true;
     try { cleanupFn(); } catch (_) {}
+    try { process.stdout.write(restore); } catch (_) {}
     exitRaw();
   };
+
   process.on("exit", handler);
-  process.on("SIGINT", () => { handler(); process.exit(0); });
-  process.on("SIGTERM", () => { handler(); process.exit(0); });
+  // 128 + signal number, the convention a shell reads back from $?.
+  process.on("SIGINT", () => { handler(); process.exit(130); });
+  process.on("SIGTERM", () => { handler(); process.exit(143); });
+  process.on("SIGHUP", () => { handler(); process.exit(129); });
 }

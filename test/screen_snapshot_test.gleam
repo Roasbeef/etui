@@ -263,7 +263,7 @@ pub fn the_scroll_screen_reports_the_rows_it_was_given_test() {
 }
 
 pub fn every_lab_screen_fills_its_width_test() {
-  list.each(["1", "2", "3", "4", "5", "6"], fn(key) {
+  list.each(["1", "2", "3", "4", "5", "6", "7"], fn(key) {
     list.each([#(80, 24), #(120, 32)], fn(size) {
       let #(width, height) = size
       let buf = lab_frame(key, width, height)
@@ -368,6 +368,37 @@ pub fn the_text_screen_carries_the_squiggle_through_a_reflow_test() {
   #("wide", list.length(squiggle_cells(wide))) |> should.equal(#("wide", 9))
   #("narrow", list.length(squiggle_cells(narrow)))
   |> should.equal(#("narrow", 9))
+}
+
+/// The EXIT screen is a promise about bytes, so it has to name the bytes the
+/// library actually sends. A sequence renamed in `backend.restore_ops` and
+/// not here would leave the lab telling the reader something untrue.
+pub fn the_exit_screen_lists_what_is_really_sent_test() {
+  let buf = lab_frame("7", 96, 28)
+  let shown =
+    indices(10)
+    |> list.map(fn(i) { row_text(buf, i + 4, 96) })
+    |> string.join(" ")
+  let restore = backend.restore_sequence()
+
+  list.each(["?1000l", "?2004l", "?1049l", "?7h", "?25h"], fn(seq) {
+    #(seq, string.contains(shown, seq)) |> should.equal(#(seq, True))
+    #(seq, string.contains(restore, "\u{001B}[" <> seq))
+    |> should.equal(#(seq, True))
+  })
+}
+
+pub fn the_exit_screen_names_all_three_endings_test() {
+  let buf = lab_frame("7", 96, 28)
+  let shown =
+    indices(8)
+    |> list.map(fn(i) { row_text(buf, i + 13, 96) })
+    |> string.join(" ")
+
+  string.contains(shown, "kill -9") |> should.equal(True)
+  string.contains(shown, "kill -INT") |> should.equal(True)
+  // The flag without which an external SIGINT is the VM's, not ours.
+  string.contains(shown, "ERL_FLAGS=+B") |> should.equal(True)
 }
 
 pub fn the_text_screen_expands_tabs_test() {

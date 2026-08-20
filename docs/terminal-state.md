@@ -1,0 +1,67 @@
+# Terminal state
+
+An app that draws with etui borrows the terminal: raw mode, the alternate
+screen, mouse reporting, maybe bracketed paste, usually a hidden cursor.
+Every one of those has to be given back, including when the program ends in a
+way that runs none of its own code.
+
+## What is sent
+
+`backend.restore_sequence()` is the whole of it, defined once and used by
+every target and by the two places that cannot call Gleam at all:
+
+| Sequence | Undoes |
+|---|---|
+| `?1000l ?1002l ?1003l ?1005l ?1006l ?1007l ?1015l` | mouse reporting, in every encoding a terminal might have accepted |
+| `?2004l` | bracketed paste |
+| `?1049l` | the alternate screen |
+| `?7h` | auto-wrap, which etui turns off to reclaim the last column |
+| `0m` | colours and modifiers |
+| `?25h` | a hidden cursor |
+
+It is unconditional. Asking a terminal to leave a mode it was never in costs
+nothing, and cleanup runs when the state is least trustworthy.
+
+## The ways an app ends
+
+**Its own loop.** `terminal.restore` (or `backend.cleanup`, or the end of
+`app.run_*`) sends the sequence and leaves raw mode. Nothing else is involved.
+
+**The runtime dies without unwinding** — `erlang:halt`, a crash, `kill -9`.
+No Gleam code runs. On the Erlang target an orphan `/bin/sh` process, started
+when the app entered raw mode, notices the runtime is gone and writes the
+sequence to the terminal device itself. It is a plain POSIX script: no bash,
+no fractional-sleep requirement, no assumption that `/tmp` is writable.
+
+It needs a terminal it can name. When `ps` cannot say which terminal the
+process belongs to — a pipe, some CI runners, a daemon — no watchdog is
+installed, because an orphan is detached from the session and `/dev/tty`
+means nothing to it.
+
+**A signal from outside.** In raw mode Ctrl+C is not a signal at all: ISIG is
+off, so it arrives as byte 3 and etui delivers it as the key `"ctrl+c"` for
+the app to handle. A signal sent from elsewhere (`kill -INT`) is a different
+matter: the BEAM reserves SIGINT for its own break handler and refuses
+`os:set_signal(sigint, handle)` — measured on OTP 27, 28 and 29 — so the app
+is left at the break prompt with the terminal still borrowed.
+
+Start the VM with `+B` if an app should die on SIGINT:
+
+```sh
+ERL_FLAGS="+B" gleam run
+```
+
+With `+B` the signal terminates the runtime and the watchdog restores the
+terminal. Without it, nothing inside the VM can help.
+
+## Checking it
+
+None of this can be tested from the test suite: it needs a real terminal
+device, and the interesting paths are the ones where no library code runs.
+
+```sh
+python3 dev/pty_cleanup_check.py
+```
+
+allocates a pty, gives an app a controlling terminal on it, ends it three
+different ways, and reads back what arrived on the terminal.

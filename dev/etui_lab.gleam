@@ -16,6 +16,7 @@
 ///   4 SCROLL   viewports that hold still, and clicking on a layout
 ///   5 TEXT     wrapping that carries the styles with the words
 ///   6 UNDER    an underline in a colour of its own (SGR 58)
+///   7 EXIT     what the terminal must look like after this app is gone
 import etui/backend
 import etui/buffer
 import etui/geometry.{
@@ -86,6 +87,7 @@ pub type Screen {
   Scroll
   Prose
   Underline
+  Exit
 }
 
 pub type Model {
@@ -161,6 +163,7 @@ fn on_key(key: String, m: Model) -> Model {
     "4", _ -> Model(..m, screen: Scroll)
     "5", _ -> Model(..m, screen: Prose)
     "6", _ -> Model(..m, screen: Underline)
+    "7", _ -> Model(..m, screen: Exit)
 
     // TEXT: narrow and widen the wrap column
     "left", Prose -> Model(..m, prose_width: int.max(8, m.prose_width - 2))
@@ -280,6 +283,7 @@ fn chrome(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
         #("4 SCROLL", Scroll),
         #("5 TEXT", Prose),
         #("6 UNDER", Underline),
+        #("7 EXIT", Exit),
       ],
       fn(entry) {
         let #(label, which) = entry
@@ -298,7 +302,7 @@ fn chrome(buf: buffer.Buffer, m: Model, screen: Rect) -> buffer.Buffer {
   |> line_at(0, 1, w, [tinted(string.repeat("─", w), muted)])
   |> line_at(0, h - 1, w, [
     styled(
-      text.pad_right(" 1-6 screens   TAB cycle   ←/→ adjust   q quit", w),
+      text.pad_right(" 1-7 screens   TAB cycle   ←/→ adjust   q quit", w),
       style.new(muted, bar_bg, style.none()),
     ),
   ])
@@ -558,6 +562,98 @@ fn render_styles(buf: buffer.Buffer, screen: Rect) -> buffer.Buffer {
     styled("SECRET", base |> style.add_modifier(style.hidden())),
     plain("]"),
     tinted("  the brackets must stay six cells apart", muted),
+  ])
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 7 EXIT
+//
+// The only screen whose subject is what happens after the screen is gone.
+// An app that leaves the terminal in raw mode with the alternate screen up
+// is a broken shell until the user types `reset`, and every way of ending
+// has to avoid that, including the ones where no Gleam code runs.
+
+fn render_exit(buf: buffer.Buffer, screen: Rect) -> buffer.Buffer {
+  let area = body(screen)
+  let x = area.position.x
+  let w = area.size.width
+
+  let buf =
+    heading(
+      buf,
+      area,
+      "HANDING THE TERMINAL BACK",
+      "after q: a visible cursor, a normal prompt, and your scrollback intact.",
+    )
+
+  let buf =
+    line_at(buf, x, area.position.y + 3, w, [
+      tinted(
+        "what etui sends on the way out, in this order",
+        style.Indexed(238),
+      ),
+    ])
+  let rows = [
+    #("?1000l ?1002l ?1006l", "mouse reporting off, every encoding"),
+    #("?2004l", "bracketed paste off"),
+    #("?1049l", "leave the alternate screen"),
+    #("?7h", "auto-wrap back on, which this app turned off"),
+    #("0m", "attributes reset"),
+    #("?25h", "cursor visible, and last on purpose"),
+  ]
+  let buf =
+    list.index_fold(rows, buf, fn(acc, row, i) {
+      let #(seq, why) = row
+      line_at(acc, x, area.position.y + 4 + i, w, [
+        tinted(text.pad_right("  ESC [ " <> seq, 26), good),
+        tinted(why, muted),
+      ])
+    })
+
+  let buf =
+    heading(
+      buf,
+      rect_new(x, area.position.y + 11, w, 2),
+      "THE THREE WAYS OUT",
+      "each one has to end with the same terminal state.",
+    )
+  let ways = [
+    #("q", "the app's own loop. Cleanup runs as ordinary code."),
+    #(
+      "kill -9 from another terminal",
+      "no Gleam code runs. A watchdog shell notices and restores.",
+    ),
+    #(
+      "kill -INT",
+      "needs ERL_FLAGS=+B, or the VM keeps the signal for its break handler.",
+    ),
+  ]
+  let buf =
+    list.index_fold(ways, buf, fn(acc, way, i) {
+      let #(how, what) = way
+      line_at(acc, x, area.position.y + 14 + i, w, [
+        tinted(text.pad_right("  " <> how, 32), accent),
+        tinted(what, muted),
+      ])
+    })
+
+  let buf =
+    line_at(buf, x, area.position.y + 18, w, [
+      tinted(
+        "in raw mode Ctrl+C is not a signal: it arrives as the key ",
+        muted,
+      ),
+      styled("ctrl+c", style.new(good, style.Default, style.none())),
+      tinted(", which screen 3 shows.", muted),
+    ])
+
+  line_at(buf, x, area.position.y + 20, w, [
+    tinted("all three are checked by ", muted),
+    plain("python3 dev/pty_cleanup_check.py"),
+    tinted(
+      "  — it needs a real terminal device, so it is not in the suite.",
+      muted,
+    ),
   ])
 }
 
@@ -1018,6 +1114,7 @@ pub fn render(m: Model, screen: Rect) -> #(buffer.Buffer, Model, List(Rect)) {
     Scroll -> render_scroll(base, m, screen, settled)
     Prose -> render_prose(base, m, screen)
     Underline -> render_underline(base, screen)
+    Exit -> render_exit(base, screen)
   }
   #(buf, Model(..m, list_state: settled), scroll_panes(body(screen)))
 }

@@ -32,6 +32,11 @@ Small, but they will not compile silently:
 
 ### Added
 
+- **`backend.restore_sequence`, `restore_ops`, `op_to_ansi` and `ops_to_ansi`:**
+  one definition of what an app sends the terminal, shared by every target and
+  handed to the two places that cannot call Gleam — the shell watchdog and the
+  Node exit handler. See the new [Terminal state](docs/terminal-state.md)
+  guide.
 - **`etui/input`:** incremental terminal input parsing, pure and testable
   without a TTY. `parse` returns every event it can decode plus the bytes that
   do not yet form a complete sequence; `flush` resolves a leftover into Escape
@@ -124,6 +129,37 @@ Small, but they will not compile silently:
 - **Status bar sections overwrote each other.** Left, right and centre were
   placed independently, so a narrow bar rendered them on top of one another.
   They now get disjoint spans and truncate instead.
+- **Cleanup was a bash script, on systems that need not have bash.** The
+  watchdog that hands the terminal back when the runtime dies without
+  unwinding was `/bin/bash` with `$'\x1b'` ANSI-C quoting. Where /bin holds no
+  bash — Alpine, NixOS, a BSD — the port never opened and the safety net
+  silently did not exist. It is POSIX `/bin/sh` now, with the escape bytes
+  octal-escaped so no shell has to be trusted with a quoting rule, a fallback
+  for a `sleep` that will not take a fraction, and the flag file in `TMPDIR`
+  rather than an assumed `/tmp`.
+- **`stty sane` reset `/dev/null`, not the terminal.** `os:cmd/1` runs with
+  stdin redirected from /dev/null and stty acts on its standard input, so the
+  call that was supposed to restore cooked mode had been doing nothing at all.
+- **The JavaScript backends restored two modes out of six.** Node and browser
+  cleanup sent `DisableMouse` and `ExitAltScreen` only: an app that turned on
+  bracketed paste or hid the cursor left the terminal that way. Both send the
+  full sequence now, on `exit`, SIGINT, SIGTERM and SIGHUP, with the exit code
+  the shell expects, registered once however many times an app starts.
+- **Two watchdogs could agree that neither had to do anything.** They shared
+  one flag file per runtime, so an app that entered raw mode twice could have
+  the older orphan consume the flag meant for the newer one, leaving both
+  convinced the exit had been clean. One file per watchdog now.
+- **The watchdog printed an error into the terminal it could not repair.**
+  With no way to name a terminal device it was installed anyway, pointed at
+  `/dev/tty`, which means nothing to a process detached from the session:
+  `/bin/sh: /dev/tty: Device not configured`. It is not installed in that case,
+  and terminal detection now also asks about the parent process, which is
+  where a runtime started without its own controlling terminal usually finds
+  one.
+- **The three backends each kept their own copy of the escape-sequence
+  table,** and the copies had drifted: `EnableMouse` asked for click tracking
+  (1000) on the JavaScript targets and not on Erlang, so the same program
+  reported subtly different mouse events depending on where it ran.
 - **Diffing a steady frame got cheaper on JavaScript, not more expensive.**
   A cell is compared against itself far more often than against anything else,
   and identity settles that in a pointer compare; the structural walk is left

@@ -1,5 +1,8 @@
-@target(javascript)
 /// Terminal backend abstraction. Two implementations: Erlang + JS/Node.
+import gleam/int
+import gleam/list
+
+@target(javascript)
 import gleam/javascript/promise
 
 pub type RenderOp {
@@ -135,4 +138,64 @@ pub fn cleanup(backend: Backend(state), state: state) -> Nil {
 
 pub fn clear_and_home() -> List(RenderOp) {
   [ClearScreen, MoveCursor(0, 0)]
+}
+
+/// The escape sequence for one render op.
+///
+/// One table, not one per backend. The three backends each carried a copy,
+/// and the copies had already drifted: `EnableMouse` asked for click
+/// tracking (1000) on the JavaScript targets and not on Erlang, so the same
+/// program reported subtly different mouse events depending on where it ran.
+pub fn op_to_ansi(op: RenderOp) -> String {
+  case op {
+    Write(s) -> s
+    MoveCursor(x, y) ->
+      "\u{001B}[" <> int.to_string(y + 1) <> ";" <> int.to_string(x + 1) <> "H"
+    ClearScreen -> "\u{001B}[2J\u{001B}[H"
+    EnterAltScreen -> "\u{001B}[?1049h"
+    ExitAltScreen -> "\u{001B}[?1049l"
+    // Button-event tracking (1002) rather than plain click tracking (1000):
+    // it reports motion while a button is held, which is what makes MouseDrag
+    // possible. 1006 is the SGR encoding, which lifts the 223-column limit.
+    EnableMouse -> "\u{001B}[?1002h\u{001B}[?1006h"
+    // Clear all common xterm mouse/alt-scroll modes so the shell does not
+    // inherit wheel or click reporting after the app exits.
+    DisableMouse ->
+      "\u{001B}[?1007l\u{001B}[?1015l\u{001B}[?1006l\u{001B}[?1005l\u{001B}[?1003l\u{001B}[?1002l\u{001B}[?1000l"
+    EnableBracketedPaste -> "\u{001B}[?2004h"
+    DisableBracketedPaste -> "\u{001B}[?2004l"
+  }
+}
+
+/// Concatenated escape sequences for a list of ops.
+pub fn ops_to_ansi(ops: List(RenderOp)) -> String {
+  list.fold(ops, "", fn(acc, op) { acc <> op_to_ansi(op) })
+}
+
+/// Everything an app has to undo before the terminal is someone else's again.
+///
+/// Unconditional, and in this order on purpose: a cleanup path runs when
+/// things have already gone wrong, and asking a terminal to leave a mode it
+/// was never in costs nothing, while tracking which modes were entered costs
+/// a correct answer exactly when the state is least trustworthy.
+pub fn restore_ops() -> List(RenderOp) {
+  [
+    DisableMouse,
+    DisableBracketedPaste,
+    ExitAltScreen,
+    // Auto-wrap back on (the alt screen is left with it off), attributes
+    // reset, cursor visible. No RenderOp names these: they are not things an
+    // app asks for, they are the state a terminal is handed back in.
+    Write("\u{001B}[?7h\u{001B}[0m\u{001B}[?25h"),
+  ]
+}
+
+/// `restore_ops` as the bytes to send.
+///
+/// The single source for the restore sequence on every target, including the
+/// two places that cannot call Gleam: the shell watchdog that fires when the
+/// runtime dies without unwinding, and the Node exit handler. Both are handed
+/// this string rather than keeping a copy of it.
+pub fn restore_sequence() -> String {
+  ops_to_ansi(restore_ops())
 }
