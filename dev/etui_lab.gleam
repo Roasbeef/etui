@@ -737,17 +737,27 @@ fn render_underline(buf: buffer.Buffer, screen: Rect) -> buffer.Buffer {
       plain(" them into events."),
     ])
 
-  line_at(buf, x, area.position.y + 16, w, [
-    tinted(
-      "kitty, VTE, WezTerm and iTerm2 draw the colour. Terminals without SGR 58",
-      muted,
-    ),
+  // Which terminal you are in decides whether this screen can show anything
+  // at all, so it says so rather than leaving the reader to wonder whether
+  // the library is broken.
+  let buf =
+    line_at(buf, x, area.position.y + 16, w, [
+      tinted("draws the colour: ", muted),
+      tinted("kitty, WezTerm, iTerm2, foot, and VTE terminals", good),
+    ])
+  let buf =
+    line_at(buf, x, area.position.y + 17, w, [
+      tinted("cannot: ", muted),
+      tinted("Apple Terminal", warn),
+      tinted(" — there the line takes the text colour, as before 2.0.", muted),
+    ])
+
+  line_at(buf, x, area.position.y + 19, w, [
+    tinted("to check yours without etui, paste into a shell:", muted),
   ])
-  |> line_at(x, area.position.y + 17, w, [
-    tinted(
-      "ignore it and underline in the foreground colour, as before 2.0.",
-      muted,
-    ),
+  |> line_at(x, area.position.y + 20, w, [
+    plain("  printf '\\033[4;58:5:9mtest\\033[0m\\n'"),
+    tinted("   the line should be red", muted),
   ])
 }
 
