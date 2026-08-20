@@ -594,7 +594,7 @@ fn render_exit(buf: buffer.Buffer, screen: Rect) -> buffer.Buffer {
       ),
     ])
   let rows = [
-    #("?1000l ?1002l ?1006l", "mouse reporting off, every encoding"),
+    #("?1000l ?1002l ?1006l", "mouse reporting, every encoding"),
     #("?2004l", "bracketed paste off"),
     #("?1049l", "leave the alternate screen"),
     #("?7h", "auto-wrap back on, which this app turned off"),
@@ -605,7 +605,7 @@ fn render_exit(buf: buffer.Buffer, screen: Rect) -> buffer.Buffer {
     list.index_fold(rows, buf, fn(acc, row, i) {
       let #(seq, why) = row
       line_at(acc, x, area.position.y + 4 + i, w, [
-        tinted(text.pad_right("  ESC [ " <> seq, 26), good),
+        tinted(text.pad_right("  ESC " <> seq, 28), good),
         tinted(why, muted),
       ])
     })
@@ -618,42 +618,30 @@ fn render_exit(buf: buffer.Buffer, screen: Rect) -> buffer.Buffer {
       "each one has to end with the same terminal state.",
     )
   let ways = [
-    #("q", "the app's own loop. Cleanup runs as ordinary code."),
-    #(
-      "kill -9 from another terminal",
-      "no Gleam code runs. A watchdog shell notices and restores.",
-    ),
-    #(
-      "kill -INT",
-      "needs ERL_FLAGS=+B, or the VM keeps the signal for its break handler.",
-    ),
+    #("q", "the app's own loop, cleanup as ordinary code"),
+    #("kill -9 from elsewhere", "no library code runs: a shell orphan restores"),
+    #("kill -INT", "needs ERL_FLAGS=+B, or the VM keeps the signal"),
   ]
   let buf =
     list.index_fold(ways, buf, fn(acc, way, i) {
       let #(how, what) = way
       line_at(acc, x, area.position.y + 14 + i, w, [
-        tinted(text.pad_right("  " <> how, 32), accent),
+        tinted(text.pad_right("  " <> how, 26), accent),
         tinted(what, muted),
       ])
     })
 
   let buf =
     line_at(buf, x, area.position.y + 18, w, [
-      tinted(
-        "in raw mode Ctrl+C is not a signal: it arrives as the key ",
-        muted,
-      ),
+      tinted("in raw mode Ctrl+C is no signal: it arrives as ", muted),
       styled("ctrl+c", style.new(good, style.Default, style.none())),
-      tinted(", which screen 3 shows.", muted),
+      tinted(", see screen 3.", muted),
     ])
 
   line_at(buf, x, area.position.y + 20, w, [
-    tinted("all three are checked by ", muted),
-    plain("python3 dev/pty_cleanup_check.py"),
-    tinted(
-      "  — it needs a real terminal device, so it is not in the suite.",
-      muted,
-    ),
+    tinted("checked by ", muted),
+    plain("dev/pty_cleanup_check.py"),
+    tinted(" — it needs a real terminal device", muted),
   ])
 }
 
