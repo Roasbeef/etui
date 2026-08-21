@@ -84,14 +84,25 @@ let s = style.new(c, style.Default, style.none())
 ## Spinner built-in frames
 
 ```gleam
-spinner.Dots      // ⣾ ⣽ ⣻ ⢿ ⡿ ⣟ ⣯ ⣷
-spinner.Braille   // braille rotation
-spinner.Arc       // ◜ ◠ ◝ ◞ ◡ ◟
-spinner.Line      // – \ | /
-spinner.Bounce    // ⠁ ⠂ ⠄ ⠂
+spinner.Dots        // ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
+spinner.Line        // - \ | /
+spinner.Circle      // ◐ ◓ ◑ ◒
+spinner.Bounce      // ⠁ ⠂ ⠄ ⠂
+spinner.MiniDot     // ⠂ ⠁ ⠈ ⠐ ⠠ ⢀ ⡀ ⠄
+spinner.Jump        // ▀ ▄
+spinner.Pulse       // █ ▓ ▒ ░ ▒ ▓
+spinner.Points      // ∙∙∙ ●∙∙ ∙●∙ ∙∙●
+spinner.Globe       // 🌍 🌎 🌏
+spinner.Moon        // 🌑 🌒 🌓 🌔 🌕 🌖 🌗 🌘
+spinner.Monkey      // 🙈 🙉 🙊
+spinner.Meter       // ▱▱▱ ▰▱▱ ▰▰▱ ▰▰▰ ▰▰▱ ▰▱▱
+spinner.Hamburger   // ☱ ☲ ☴ ☲
+spinner.Ellipsis    // "   " ".  " ".. " "..."
+spinner.Custom(["a", "b", "c"])
 ```
 
-Advance frame each tick; spinner wraps automatically.
+Advance frame each tick; the spinner cycles its own frame count, so any
+integer works.
 
 ## Marquee (scrolling text)
 

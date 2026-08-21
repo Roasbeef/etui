@@ -29,8 +29,30 @@ gleam format src test dev
 1. **Widget render signature:** `fn(Buffer, Rect, Widget) -> Buffer` (or `render_stateful` with external state).
 2. **Pipe style:** `buffer.buffer_new(area) |> widget.render(area, w)` — buffer first via `|>`.
 3. **Pure core:** `geometry`, `text`, `buffer`, widgets must not import `backend`.
-4. **Docs:** update `docs/` and `doc_snippets_compile_test` in `test/app_loop_test.gleam` when changing public API snippets.
+4. **Docs:** update `docs/` when changing public API, and run the two checkers
+   below. Snippets that must compile live in `doc_snippets_compile_test`
+   (`test/app_loop_test.gleam`) and `test/migration_examples_test.gleam`.
 5. **Format:** `gleam format` before opening a PR.
+
+## Checking the docs
+
+```sh
+python3 dev/check_docs_api.py         # every name in docs/ and README exists in src/
+python3 dev/check_guide_snippets.py   # the migration guide claims only what tests assert
+```
+
+The first one exists because four widget sections had been describing an API
+that no longer existed; a name check catches that and a human reading does not.
+
+## Checking the terminal is handed back
+
+```sh
+python3 dev/pty_cleanup_check.py
+```
+
+Needs a real terminal device, so it cannot live in `gleam test`. It ends an app
+four ways — its own loop, `kill -9`, and SIGINT under `+B` and `+Bd` — and
+reads back what arrived on the terminal.
 
 ## Tests
 

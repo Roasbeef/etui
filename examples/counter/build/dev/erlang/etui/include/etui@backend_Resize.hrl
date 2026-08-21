@@ -1,0 +1,4 @@
+-record(resize, {
+    width :: integer(),
+    height :: integer()
+}).

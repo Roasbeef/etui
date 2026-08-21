@@ -5,7 +5,7 @@
 ```toml
 # gleam.toml
 [dependencies]
-etui = ">= 1.0.0 and < 2.0.0"
+etui = ">= 2.0.0 and < 3.0.0"
 ```
 
 ## Minimal app
@@ -64,13 +64,19 @@ app.run_buffered(
 ### InputEvent
 
 ```gleam
-backend.KeyPress(key)              // key string: "a", "A", " ", "\r", etc.
+backend.KeyPress(key)              // key string: "a", "A", " ", "\r", "ctrl+c", "shift+left"
 backend.Resize(w, h)               // terminal was resized
 backend.Tick                       // emitted each poll interval (no input)
 backend.MousePress(x, y, button)   // optional: use default.new_with_mouse()
 backend.MouseRelease(x, y, button)
+backend.MouseDrag(x, y, button)    // moved with a button held
+backend.MouseMove(x, y)            // moved with no button held
 backend.MouseScroll(x, y, up)
+backend.Paste(text)                // opt in: default.new_with_options(...)
 ```
+
+A `case` over `InputEvent` needs a `_ ->` arm: the type gains variants in
+minor releases, and did in 2.0.
 
 ### App loop variants
 
@@ -107,15 +113,40 @@ fn update(event: backend.InputEvent, model: Model) -> Model {
 }
 ```
 
+A modified named key — `"shift+left"`, `"ctrl+down"` — is `Unknown` to
+`keys.match`, because it is not a character. Use `keys.parse` when you want
+the modifier as data:
+
+```gleam
+case keys.parse(raw) {
+  keys.KeyEvent(keys.Left, keys.Modifiers(shift: True, ..)) -> select_left(model)
+  keys.KeyEvent(keys.Left, _) -> move_left(model)
+  _ -> model
+}
+```
+
 ## Crash-restore guarantee
 
-`app.run` wraps the event loop in Erlang `try...after` via FFI. If `view_fn` or `update_fn` raises, the terminal is restored (raw mode off, alt screen exit) before the exception propagates.
+All four app loops wrap the event loop in Erlang `try...after` via FFI. If
+`view_fn` or `update_fn` raises, the terminal is restored — raw mode off, alt
+screen left, cursor back — before the exception propagates.
 
-On the Erlang target, `gleam run` inherits the BEAM default for `Ctrl+C`: by default it opens the BREAK handler instead of terminating the process immediately. Etui restores the terminal on normal exits, exceptions, and supported abort paths, but if you want `Ctrl+C` to terminate the session directly, start the runtime with `ERL_AFLAGS="+Bd"`, for example:
+`erlang:halt`, a `kill -9` or any other end that unwinds nothing runs no Gleam
+code at all. An orphan shell process, started when the app entered raw mode,
+notices the runtime is gone and restores the terminal itself.
+
+`Ctrl+C` is not a signal in raw mode: `ISIG` is off, so it arrives as the key
+`"ctrl+c"` for your `update` to handle. A SIGINT from somewhere else *is* a
+signal, and the BEAM keeps it for its own break handler: the app stops
+responding and the terminal stays borrowed. Disable the break handler if that
+matters to you:
 
 ```sh
-ERL_AFLAGS="+Bd" gleam run -m your_module
+ERL_FLAGS="+B" gleam run -m your_module     # or ERL_AFLAGS="+Bd", the same thing
 ```
+
+Both were checked against a real terminal with `dev/pty_cleanup_check.py`.
+[Terminal state](terminal-state.md) has the details.
 
 ## Manual drive (no app loop)
 

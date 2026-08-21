@@ -15,9 +15,10 @@ three different ways, and reads back what arrived on the terminal.
   quit      the app quits through its own loop
   kill      the runtime is killed outright, so no cleanup code runs and the
             orphan shell watchdog is the only thing left
-  sigint    an external SIGINT. Needs ERL_FLAGS=+B, without which the VM
-            takes the signal for its own break handler and neither exits nor
-            reads input again; that is a property of the VM, not of etui.
+  sigint    an external SIGINT. Needs the break handler disabled — +B, or
+            equivalently +Bd — without which the VM takes the signal for its
+            own break handler and neither exits nor reads input again. That is
+            a property of the VM, not of etui.
 """
 
 import os, pty, select, signal, subprocess, sys, time, fcntl, termios
@@ -33,7 +34,7 @@ RESTORE = {
 }
 
 
-def run(ending, env=None):
+def run(ending, env=None, label=None):
     master, slave = pty.openpty()
     os.set_blocking(master, False)
 
@@ -83,7 +84,8 @@ def run(ending, env=None):
     os.close(master)
     tail = bytes(out[mark:])
     missing = [name for name, seq in RESTORE.items() if seq not in tail]
-    print(f"  {ending:7} {'ok' if not missing else 'MISSING ' + ', '.join(missing)}")
+    name = label or ending
+    print(f"  {name:16} {'ok' if not missing else 'MISSING ' + ', '.join(missing)}")
     return not missing
 
 
@@ -93,5 +95,7 @@ if __name__ == "__main__":
     time.sleep(1)
     ok &= run("kill")
     time.sleep(1)
-    ok &= run("sigint", env={"ERL_FLAGS": "+B"})
+    ok &= run("sigint", env={"ERL_FLAGS": "+B"}, label="sigint +B")
+    time.sleep(1)
+    ok &= run("sigint", env={"ERL_AFLAGS": "+Bd"}, label="sigint +Bd")
     sys.exit(0 if ok else 1)

@@ -42,8 +42,10 @@ means nothing to it.
 off, so it arrives as byte 3 and etui delivers it as the key `"ctrl+c"` for
 the app to handle. A signal sent from elsewhere (`kill -INT`) is a different
 matter: the BEAM reserves SIGINT for its own break handler and refuses
-`os:set_signal(sigint, handle)` — measured on OTP 27, 28 and 29 — so the app
-is left at the break prompt with the terminal still borrowed.
+`os:set_signal(sigint, handle)` unless the VM was started with `+B`, so the
+app is left at the break prompt with the terminal still borrowed. Measured on
+OTP 29; the fallback path in the code predates that and was written for the
+same refusal on OTP 28.
 
 Start the VM with `+B` if an app should die on SIGINT:
 

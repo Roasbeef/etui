@@ -97,9 +97,8 @@ drain_input(TimeoutMs) ->
 %%
 %% os:set_signal(sigint, handle) is the one that would let this be handled in
 %% Erlang. The VM reserves SIGINT for its own break handler and refuses the
-%% call with badarg unless it was started with +B; measured on OTP 29, and
-%% the same on 27 and 28. When it does succeed, a watcher process runs the
-%% cleanup and halts with 130.
+%% call with badarg unless it was started with +B; measured on OTP 29. When
+%% it does succeed, a watcher process runs the cleanup and halts with 130.
 %%
 %% Otherwise the shell watchdog below is what is left. It cannot intercept
 %% the signal, only notice the runtime dying afterwards, which covers halt,

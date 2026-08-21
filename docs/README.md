@@ -12,6 +12,7 @@ Guides for using the library. API details also live in `///` doc comments on eac
 | [Custom widgets](custom-widgets.md) | Composition, stateful/animated helpers |
 | [Animation](animation.md) | `run_animated`, `anim` helpers |
 | [Focus](focus.md) | `FocusRing` for multi-panel UIs |
+| [Migrating to 2.0](migrating-to-2.0.md) | What changed from 1.x, what breaks, and what does not |
 | [Terminal state](terminal-state.md) | What is restored on the way out, and what happens when nothing gets to run |
 
 ## Targets

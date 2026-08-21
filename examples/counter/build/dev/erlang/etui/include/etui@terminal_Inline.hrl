@@ -1,0 +1,3 @@
+-record(inline, {
+    height :: integer()
+}).

@@ -1,0 +1,3 @@
+-record(determinate, {
+    percent :: integer()
+}).

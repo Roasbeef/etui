@@ -163,9 +163,9 @@ Horizontal bar chart.
 import etui/widgets/hbar
 
 hbar.render(buf, area, hbar.hbar_new([
-  hbar.Bar("Rust", 90),
-  hbar.Bar("Gleam", 75),
-  hbar.Bar("Python", 60),
+  hbar.HBarItem("Rust", 90),
+  hbar.HBarItem("Gleam", 75),
+  hbar.HBarItem("Python", 60),
 ]))
 ```
 
@@ -187,18 +187,26 @@ Uses braille dots by default. Values auto-scaled to area height.
 
 ## Canvas (Braille)
 
-2×4 braille dot canvas. Each terminal cell = 2×4 pixel grid.
+One or more series of values, plotted as braille dots. Each terminal cell is a
+2×4 pixel grid, so the plot has four times the vertical resolution of a
+sparkline.
 
 ```gleam
 import etui/widgets/canvas
-import etui/braille
 
-let c = canvas.canvas_new(area.size.width * 2, area.size.height * 4)
-let c = canvas.set_pixel(c, 10, 5, True)
-let c = canvas.line(c, 0, 0, 40, 20, True)
+let c =
+  canvas.canvas_new([
+    canvas.series_new([3, 7, 4, 9, 2, 8])
+      |> canvas.with_series_fill(canvas.SeriesSolid(style.Indexed(2))),
+    canvas.series_new([1, 2, 3, 4, 5, 6]),
+  ])
+  |> canvas.with_max(10)
 
-canvas.render(buf, area, c)
+canvas.render(buf, area, c, frame)
 ```
+
+`frame` drives `SeriesAnimatedRainbow`; any other fill ignores it. `with_max(0)`
+(the default) scales to the largest value across all series.
 
 Braille block: U+2800–U+28FF. Pixel (col, row) maps to cell (col/2, row/4).
 
@@ -382,9 +390,12 @@ Horizontal or vertical divider.
 ```gleam
 import etui/widgets/line
 
-line.render(buf, area, line.line_new(line.Horizontal))
-line.render(buf, area, line.line_new(line.Vertical))
+line.render_horizontal(buf, area, line.line_new())
+line.render_vertical(buf, area, line.line_new() |> line.with_color(style.Indexed(8)))
 ```
+
+The direction is the function, not a field: a `Line` carries only its style
+and colour.
 
 ---
 
@@ -430,18 +441,25 @@ clear.render(buf, area)
 
 ## Scene
 
-Pre-composed static layout. Attach multiple widgets to named areas, render all at once.
+Braille-pixel drawing: shapes on the 2×4 sub-cell grid, rendered together.
 
 ```gleam
 import etui/widgets/scene
 
 let s =
-  scene.scene_new()
-  |> scene.add("header", header_w, header_area)
-  |> scene.add("body", body_w, body_area)
+  scene.scene_new([
+    scene.Disc(cx: 40, cy: 20, r: 8, fill: scene.SceneSolid(style.Indexed(3))),
+    scene.CircleOutline(cx: 40, cy: 20, r: 16, fill: scene.SceneRainbow),
+    scene.Planet(cx: 40, cy: 20, orbit_r: 16, dot_r: 2, fill: scene.SceneRainbow, period: 120),
+  ])
+  |> scene.with_bg(style.Indexed(0))
 
-scene.render(buf, s)
+scene.render(buf, area, s, frame)
 ```
+
+Coordinates are braille pixels, so an area 80 cells wide and 24 tall is 160×96
+of them. `frame` animates `Planet` and `SceneAnimatedRainbow`; the other
+shapes and fills ignore it.
 
 ---
 
@@ -570,6 +588,8 @@ let p =
   paginator.paginator_new(5)
   |> paginator.with_page_size(10)
   |> paginator.with_style(paginator.Dots)
+
+import gleam/list
 
 // Navigation
 let p = paginator.next_page(p)

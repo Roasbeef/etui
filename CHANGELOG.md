@@ -108,6 +108,29 @@ Small, but they will not compile silently:
   that do their own wrapping can apply the same normalisation, and so tab width
   can be chosen per call site.
 
+### Documentation
+
+- **A migration guide** — [docs/migrating-to-2.0.md](docs/migrating-to-2.0.md).
+  Every "1.0.1" figure in it was produced by running 1.0.1 in a worktree at the
+  tag, not by reading its source; every "2.0.0" figure is asserted by
+  `test/migration_examples_test.gleam`, which is also where its snippets are
+  compiled.
+- **[docs/terminal-state.md](docs/terminal-state.md)** — what is restored on the
+  way out, what happens when nothing gets to run, and the one thing about
+  SIGINT that no library can fix for you.
+- **Four widget sections described widgets that had been rewritten underneath
+  them.** `canvas` was documented with `set_pixel` and `line`, which it has
+  never had in this shape; `scene` with an `add` that does not exist; `line`
+  with a direction argument that is two separate functions; `hbar` with a
+  constructor renamed to `HBarItem`. `dev/check_docs_api.py` reads the public
+  API out of `src/` and checks every name in every doc against it, which is how
+  these were found.
+- **The spinner styles list named two that do not exist** and omitted nine that
+  do.
+- `getting-started.md` still asked for `etui = ">= 1.0.0 and < 2.0.0"`, listed
+  an `InputEvent` missing three variants, and recommended a way of handling
+  Ctrl+C that misdescribes what Ctrl+C does in raw mode.
+
 ### Fixed
 
 - **The JavaScript target had none of the input work.** `node_ffi.mjs` and

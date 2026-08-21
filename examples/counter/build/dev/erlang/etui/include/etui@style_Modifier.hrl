@@ -1,0 +1,3 @@
+-record(modifier, {
+    bits :: integer()
+}).

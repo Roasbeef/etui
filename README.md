@@ -261,6 +261,8 @@ See [`docs/`](docs/) (index: [docs/README.md](docs/README.md)):
 - [Custom widgets](docs/custom-widgets.md)
 - [Animation](docs/animation.md)
 - [Focus](docs/focus.md)
+- [Terminal state](docs/terminal-state.md)
+- [Migrating to 2.0](docs/migrating-to-2.0.md)
 
 Contributors: [CONTRIBUTING.md](CONTRIBUTING.md)
 
