@@ -1,3 +1,0 @@
--record(modifier, {
-    bits :: integer()
-}).

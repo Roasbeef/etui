@@ -1,3 +1,0 @@
--record(error, {
-    reason :: binary()
-}).

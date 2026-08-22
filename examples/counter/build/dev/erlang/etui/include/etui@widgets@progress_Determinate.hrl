@@ -1,3 +1,0 @@
--record(determinate, {
-    percent :: integer()
-}).

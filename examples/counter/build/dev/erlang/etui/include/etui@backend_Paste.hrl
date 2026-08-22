@@ -1,3 +1,0 @@
--record(paste, {
-    text :: binary()
-}).
