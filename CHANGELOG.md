@@ -32,6 +32,12 @@ Small, but they will not compile silently:
 
 ### Added
 
+- **State-dependent app polling:** `run_adaptive`, `run_buffered_adaptive`,
+  `run_animated_adaptive`, and `run_buffered_cursor_adaptive` select the next
+  poll timeout from the current application state. The original APIs remain
+  source-compatible constant-timeout wrappers, and both Erlang and JavaScript
+  reevaluate the callback immediately before every poll.
+
 - **`backend.restore_sequence`, `restore_ops`, `op_to_ansi` and `ops_to_ansi`:**
   one definition of what an app sends the terminal, shared by every target and
   handed to the two places that cannot call Gleam — the shell watchdog and the
@@ -132,6 +138,11 @@ Small, but they will not compile silently:
   Ctrl+C that misdescribes what Ctrl+C does in raw mode.
 
 ### Fixed
+
+- **An application-side frame cache still paid for a whole buffer diff.** When
+  the current and previous frames are the exact same `Buffer` term, diffing now
+  stops at an identity check. Distinct buffers still take the structural path,
+  so identity remains only a positive fast path.
 
 - **The JavaScript target had none of the input work.** `node_ffi.mjs` and
   `browser_ffi.mjs` each carried a JavaScript reimplementation of the key

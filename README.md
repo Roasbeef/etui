@@ -237,6 +237,35 @@ app.run_buffered(
 
 On **JavaScript** (Node), the same functions return `Promise(AppResult(_))`.
 
+Each loop also has an `_adaptive` variant whose last argument is
+`fn(state) -> Int` instead of a constant timeout. It is evaluated immediately
+before every poll, so an application can stay responsive while active without
+waking at that rate while quiet:
+
+```gleam
+app.run_buffered_adaptive(
+  default.new(),
+  model,
+  view,
+  update,
+  fn(model) { model.quit },
+  fn(model) {
+    case model.active {
+      True -> 33
+      False -> 500
+    }
+  },
+)
+```
+
+The constant-timeout APIs remain available and behave as before. Reusing the
+exact `Buffer` term from the preceding frame also skips the cell-by-cell diff;
+distinct buffers still receive the full structural comparison.
+
+The quiet timeout is also a latency ceiling for event sources that cannot wake
+the terminal poll. An external event arriving just after a quiet poll begins
+can wait for that full timeout before the application observes it.
+
 Low-level `RenderOp` values: `Write`, `MoveCursor`, `ClearScreen`, `EnterAltScreen`, `ExitAltScreen`, `EnableMouse`, `DisableMouse`. Enable mouse with `default.new_with_mouse()`.
 
 ## Examples in this repo
