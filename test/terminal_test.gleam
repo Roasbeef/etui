@@ -191,11 +191,43 @@ pub fn frame_ops_repaints_in_full_on_a_first_frame_test() {
 }
 
 @target(erlang)
-pub fn frame_ops_emits_nothing_when_nothing_changed_test() {
+pub fn frame_ops_skips_an_exact_non_empty_buffer_term_test() {
   let screen = rect_new(0, 0, 5, 1)
-  let same = buffer.buffer_new(screen)
+  let same =
+    buffer.set_string(
+      buffer.buffer_new(screen),
+      Position(0, 0),
+      "abcde",
+      style.new(style.Default, style.Default, style.none()),
+    )
   terminal.frame_ops(same, same, False, terminal.CursorUntouched, True)
   |> should.equal([])
+}
+
+@target(erlang)
+pub fn frame_ops_still_compares_distinct_buffer_terms_test() {
+  let screen = rect_new(0, 0, 5, 1)
+  let before =
+    buffer.set_string(
+      buffer.buffer_new(screen),
+      Position(0, 0),
+      "abcde",
+      style.new(style.Default, style.Default, style.none()),
+    )
+  let after =
+    buffer.set_string(
+      buffer.buffer_new(screen),
+      Position(0, 0),
+      "abXde",
+      style.new(style.Default, style.Default, style.none()),
+    )
+
+  case
+    terminal.frame_ops(before, after, False, terminal.CursorUntouched, True)
+  {
+    [backend.Write(ansi)] -> string.contains(ansi, "X") |> should.equal(True)
+    _ -> should.fail()
+  }
 }
 
 @target(erlang)
