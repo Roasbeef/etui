@@ -353,6 +353,8 @@ pub fn draw_with(
 ///
 /// A resize is reported like any other event, and also resets the terminal's
 /// idea of what is on screen, so the next `draw` repaints at the new size.
+/// A non-blocking poll leaves an incomplete escape sequence pending; a later
+/// waiting poll either completes the sequence or resolves a lone Escape key.
 pub fn poll(
   term: Terminal(backend_state),
   timeout_ms: Int,
@@ -360,6 +362,51 @@ pub fn poll(
   case term.backend.poll(term.state, timeout_ms) {
     Ok(#(event, bs)) -> Ok(#(event, absorb(Terminal(..term, state: bs), event)))
     Error(e) -> Error(e)
+  }
+}
+
+@target(erlang)
+/// Wait for one event, then collect immediately available input up to a bound.
+///
+/// `Resize` ends the burst after being included. A `Tick` from the first,
+/// waiting poll is delivered normally; a `Tick` from a later zero-time poll
+/// only marks the end of ready input and is not delivered early. Values below
+/// one still collect the first event. Once an event has arrived, a later poll
+/// failure ends the burst rather than discarding the events already collected.
+@internal
+pub fn poll_burst(
+  term: Terminal(backend_state),
+  timeout_ms: Int,
+  max_events: Int,
+) -> Result(#(List(InputEvent), Terminal(backend_state)), backend.Error) {
+  case poll(term, timeout_ms) {
+    Ok(#(event, polled)) ->
+      case ends_burst(event) {
+        True -> Ok(#([event], polled))
+        False -> collect_burst(polled, [event], max_events - 1)
+      }
+    Error(reason) -> Error(reason)
+  }
+}
+
+@target(erlang)
+fn collect_burst(
+  term: Terminal(backend_state),
+  events: List(InputEvent),
+  remaining: Int,
+) -> Result(#(List(InputEvent), Terminal(backend_state)), backend.Error) {
+  case remaining <= 0 {
+    True -> Ok(#(list.reverse(events), term))
+    False ->
+      case poll(term, 0) {
+        Ok(#(backend.Tick, polled)) -> Ok(#(list.reverse(events), polled))
+        Ok(#(event, polled)) ->
+          case ends_burst(event) {
+            True -> Ok(#(list.reverse([event, ..events]), polled))
+            False -> collect_burst(polled, [event, ..events], remaining - 1)
+          }
+        Error(_) -> Ok(#(list.reverse(events), term))
+      }
   }
 }
 
@@ -487,6 +534,7 @@ pub fn draw_with(
 }
 
 @target(javascript)
+/// Wait up to `timeout_ms` for an event. See the Erlang docs for details.
 pub fn poll(
   term: Terminal(backend_state),
   timeout_ms: Int,
@@ -503,10 +551,69 @@ pub fn poll(
 }
 
 @target(javascript)
+/// Wait for one event, then collect immediately available input up to a bound.
+///
+/// This has the same boundary and error semantics as the Erlang implementation.
+@internal
+pub fn poll_burst(
+  term: Terminal(backend_state),
+  timeout_ms: Int,
+  max_events: Int,
+) -> promise.Promise(
+  Result(#(List(InputEvent), Terminal(backend_state)), backend.Error),
+) {
+  promise.await(poll(term, timeout_ms), fn(result) {
+    case result {
+      Ok(#(event, polled)) ->
+        case ends_burst(event) {
+          True -> promise.resolve(Ok(#([event], polled)))
+          False -> collect_burst_js(polled, [event], max_events - 1)
+        }
+      Error(reason) -> promise.resolve(Error(reason))
+    }
+  })
+}
+
+@target(javascript)
+fn collect_burst_js(
+  term: Terminal(backend_state),
+  events: List(InputEvent),
+  remaining: Int,
+) -> promise.Promise(
+  Result(#(List(InputEvent), Terminal(backend_state)), backend.Error),
+) {
+  case remaining <= 0 {
+    True -> promise.resolve(Ok(#(list.reverse(events), term)))
+    False ->
+      promise.await(poll(term, 0), fn(result) {
+        case result {
+          Ok(#(backend.Tick, polled)) ->
+            promise.resolve(Ok(#(list.reverse(events), polled)))
+          Ok(#(event, polled)) ->
+            case ends_burst(event) {
+              True ->
+                promise.resolve(Ok(#(list.reverse([event, ..events]), polled)))
+              False ->
+                collect_burst_js(polled, [event, ..events], remaining - 1)
+            }
+          Error(_) -> promise.resolve(Ok(#(list.reverse(events), term)))
+        }
+      })
+  }
+}
+
+@target(javascript)
 pub fn restore(term: Terminal(backend_state)) -> Nil {
   let _ =
     term.backend.render(term.state, close_viewport(term.viewport, area(term)))
   term.backend.cleanup(term.state)
+}
+
+fn ends_burst(event: InputEvent) -> Bool {
+  case event {
+    backend.Tick | backend.Resize(_, _) -> True
+    _ -> False
+  }
 }
 
 // A resize invalidates everything we knew about the screen.

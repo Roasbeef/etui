@@ -13,7 +13,12 @@ import gleeunit/should
 
 @target(javascript)
 type MockState {
-  MockState(events: List(backend.InputEvent), expected_timeouts: List(Int))
+  MockState(
+    events: List(backend.InputEvent),
+    expected_timeouts: List(Int),
+    renders: Int,
+    max_renders: Int,
+  )
 }
 
 @target(javascript)
@@ -26,15 +31,38 @@ fn mock_backend(
   events: List(backend.InputEvent),
   expected_timeouts: List(Int),
 ) -> backend.AsyncBackend(MockState) {
+  mock_backend_with_limit(events, expected_timeouts, -1)
+}
+
+@target(javascript)
+fn mock_backend_with_limit(
+  events: List(backend.InputEvent),
+  expected_timeouts: List(Int),
+  max_renders: Int,
+) -> backend.AsyncBackend(MockState) {
   backend.AsyncBackend(
     init: fn() {
-      Ok(MockState(events: events, expected_timeouts: expected_timeouts))
+      Ok(MockState(
+        events: events,
+        expected_timeouts: expected_timeouts,
+        renders: 0,
+        max_renders: max_renders,
+      ))
     },
-    render: fn(state, _ops) { Ok(state) },
+    render: fn(state, _ops) {
+      let renders = state.renders + 1
+      case state.max_renders >= 0 && renders > state.max_renders {
+        True -> Error(backend.IOError("too many renders"))
+        False -> Ok(MockState(..state, renders: renders))
+      }
+    },
     poll: fn(state, timeout) {
       let result = case state.expected_timeouts, state.events {
         [expected, ..timeouts], [event, ..events] if expected == timeout ->
-          Ok(#(event, MockState(events: events, expected_timeouts: timeouts)))
+          Ok(#(
+            event,
+            MockState(..state, events: events, expected_timeouts: timeouts),
+          ))
         _, _ -> Error(backend.Interrupted)
       }
       promise.resolve(result)
@@ -67,7 +95,7 @@ fn timeout(model: Counter) -> Int {
 
 @target(javascript)
 fn events() -> List(backend.InputEvent) {
-  [backend.KeyPress("x"), backend.KeyPress("q")]
+  [backend.KeyPress("x"), backend.Tick, backend.KeyPress("q")]
 }
 
 @target(javascript)
@@ -82,7 +110,7 @@ fn assert_finished(
 @target(javascript)
 pub fn run_adaptive_reevaluates_timeout_from_current_state_test() {
   app.run_adaptive(
-    mock_backend(events(), [100, 101]),
+    mock_backend([backend.KeyPress("x"), backend.KeyPress("q")], [100, 101]),
     Counter(count: 0, quit: False),
     fn(_model) { [] },
     update,
@@ -95,7 +123,7 @@ pub fn run_adaptive_reevaluates_timeout_from_current_state_test() {
 @target(javascript)
 pub fn run_buffered_adaptive_reevaluates_timeout_test() {
   app.run_buffered_adaptive(
-    mock_backend(events(), [100, 101]),
+    mock_backend(events(), [100, 0, 101]),
     Counter(count: 0, quit: False),
     fn(_model, screen) { buffer.buffer_new(screen) },
     update,
@@ -108,7 +136,7 @@ pub fn run_buffered_adaptive_reevaluates_timeout_test() {
 @target(javascript)
 pub fn run_animated_adaptive_reevaluates_timeout_test() {
   app.run_animated_adaptive(
-    mock_backend(events(), [100, 101]),
+    mock_backend(events(), [100, 0, 101]),
     Counter(count: 0, quit: False),
     fn(_model, screen, _animation) { buffer.buffer_new(screen) },
     update,
@@ -121,12 +149,29 @@ pub fn run_animated_adaptive_reevaluates_timeout_test() {
 @target(javascript)
 pub fn run_buffered_cursor_adaptive_reevaluates_timeout_test() {
   app.run_buffered_cursor_adaptive(
-    mock_backend(events(), [100, 101]),
+    mock_backend(events(), [100, 0, 101]),
     Counter(count: 0, quit: False),
     fn(_model, screen) { #(buffer.buffer_new(screen), Error(Nil)) },
     update,
     should_quit,
     timeout,
+  )
+  |> assert_finished
+}
+
+@target(javascript)
+pub fn run_buffered_coalesces_ready_input_before_redraw_test() {
+  app.run_buffered(
+    mock_backend_with_limit(
+      [backend.KeyPress("x"), backend.KeyPress("q")],
+      [16, 0],
+      2,
+    ),
+    Counter(count: 0, quit: False),
+    fn(_model, screen) { buffer.buffer_new(screen) },
+    update,
+    should_quit,
+    16,
   )
   |> assert_finished
 }

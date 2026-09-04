@@ -15,6 +15,10 @@
 /// current application state immediately before every poll. The original
 /// functions remain constant-timeout wrappers.
 ///
+/// Buffered loops also collect up to 64 immediately available events before
+/// drawing again. `Tick` and `Resize` end a burst, so time and geometry changes
+/// remain frame boundaries while queued input does not force redundant frames.
+///
 /// The three buffered loops are thin wrappers over `etui/terminal`. If you
 /// need the loop to be yours, because the terminal is not the only thing your
 /// program is doing, use that module directly.
@@ -30,6 +34,33 @@ import gleam/javascript/promise
 pub type AppResult(state) {
   Success(final_state: state)
   Error(reason: String)
+}
+
+type EventResult(state) {
+  Continue(state)
+  Quit(state)
+}
+
+fn buffered_event_limit() -> Int {
+  64
+}
+
+fn apply_events(
+  events: List(InputEvent),
+  state: state,
+  on_event: fn(InputEvent, state) -> state,
+  should_quit: fn(state) -> Bool,
+) -> EventResult(state) {
+  case events {
+    [] -> Continue(state)
+    [event, ..rest] -> {
+      let next = on_event(event, state)
+      case should_quit(next) {
+        True -> Quit(next)
+        False -> apply_events(rest, next, on_event, should_quit)
+      }
+    }
+  }
 }
 
 // Erlang try/after: runs cleanup even on panic. Returns thunk's value.
@@ -220,12 +251,17 @@ fn drive_loop(
   // shadows the built-in one, so these match on Ok and fall through.
   case terminal.draw(term, fn(frame) { build(frame, state, anim_state) }) {
     Ok(drawn) ->
-      case terminal.poll(drawn, poll_timeout_ms(state)) {
-        Ok(#(event, polled)) -> {
-          let next = on_event(event, state)
-          case should_quit(next) {
-            True -> #(next, polled)
-            False ->
+      case
+        terminal.poll_burst(
+          drawn,
+          poll_timeout_ms(state),
+          buffered_event_limit(),
+        )
+      {
+        Ok(#(events, polled)) ->
+          case apply_events(events, state, on_event, should_quit) {
+            Quit(next) -> #(next, polled)
+            Continue(next) ->
               drive_loop(
                 polled,
                 next,
@@ -236,7 +272,6 @@ fn drive_loop(
                 anim.tick(anim_state),
               )
           }
-        }
         _ -> #(state, drawn)
       }
     _ -> #(state, term)
@@ -546,27 +581,32 @@ fn drive_loop_js(
 ) -> promise.Promise(#(state, Terminal(backend_state))) {
   case terminal.draw(term, fn(frame) { build(frame, state, anim_state) }) {
     Ok(drawn) ->
-      promise.await(terminal.poll(drawn, poll_timeout_ms(state)), fn(result) {
-        case result {
-          Ok(#(event, polled)) -> {
-            let next = on_event(event, state)
-            case should_quit(next) {
-              True -> promise.resolve(#(next, polled))
-              False ->
-                drive_loop_js(
-                  polled,
-                  next,
-                  on_event,
-                  should_quit,
-                  poll_timeout_ms,
-                  build,
-                  anim.tick(anim_state),
-                )
-            }
+      promise.await(
+        terminal.poll_burst(
+          drawn,
+          poll_timeout_ms(state),
+          buffered_event_limit(),
+        ),
+        fn(result) {
+          case result {
+            Ok(#(events, polled)) ->
+              case apply_events(events, state, on_event, should_quit) {
+                Quit(next) -> promise.resolve(#(next, polled))
+                Continue(next) ->
+                  drive_loop_js(
+                    polled,
+                    next,
+                    on_event,
+                    should_quit,
+                    poll_timeout_ms,
+                    build,
+                    anim.tick(anim_state),
+                  )
+              }
+            _ -> promise.resolve(#(state, drawn))
           }
-          _ -> promise.resolve(#(state, drawn))
-        }
-      })
+        },
+      )
     _ -> promise.resolve(#(state, term))
   }
 }

@@ -334,6 +334,89 @@ pub fn an_ordinary_event_leaves_the_area_alone_test() {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// Input bursts
+
+@target(erlang)
+pub fn poll_burst_collects_ready_events_up_to_its_limit_test() {
+  let events = [
+    backend.KeyPress("a"),
+    backend.KeyPress("b"),
+    backend.KeyPress("c"),
+  ]
+  let assert Ok(term) =
+    terminal.new(recorder(events, backend.TerminalSize(20, 3)))
+  let assert Ok(#(burst, remaining)) = terminal.poll_burst(term, 16, 2)
+
+  burst
+  |> should.equal([backend.KeyPress("a"), backend.KeyPress("b")])
+  let assert Ok(#(last, _)) = terminal.poll(remaining, 0)
+  last
+  |> should.equal(backend.KeyPress("c"))
+}
+
+@target(erlang)
+pub fn poll_burst_treats_resize_as_a_frame_boundary_test() {
+  let events = [
+    backend.KeyPress("a"),
+    backend.Resize(40, 8),
+    backend.KeyPress("b"),
+  ]
+  let assert Ok(term) =
+    terminal.new(recorder(events, backend.TerminalSize(20, 3)))
+  let assert Ok(#(burst, resized)) = terminal.poll_burst(term, 16, 64)
+
+  burst
+  |> should.equal([backend.KeyPress("a"), backend.Resize(40, 8)])
+  terminal.area(resized)
+  |> should.equal(rect_new(0, 0, 40, 8))
+  let assert Ok(#(next, _)) = terminal.poll(resized, 0)
+  next
+  |> should.equal(backend.KeyPress("b"))
+}
+
+@target(erlang)
+pub fn poll_burst_uses_a_ready_tick_only_to_end_the_burst_test() {
+  let events = [
+    backend.KeyPress("a"),
+    backend.Tick,
+    backend.KeyPress("b"),
+  ]
+  let assert Ok(term) =
+    terminal.new(recorder(events, backend.TerminalSize(20, 3)))
+  let assert Ok(#(burst, remaining)) = terminal.poll_burst(term, 16, 64)
+
+  burst
+  |> should.equal([backend.KeyPress("a")])
+  let assert Ok(#(next, _)) = terminal.poll(remaining, 0)
+  next
+  |> should.equal(backend.KeyPress("b"))
+}
+
+@target(erlang)
+pub fn poll_burst_delivers_a_tick_from_the_waiting_poll_test() {
+  let assert Ok(term) =
+    terminal.new(recorder([backend.Tick], backend.TerminalSize(20, 3)))
+  let assert Ok(#(burst, _)) = terminal.poll_burst(term, 16, 64)
+
+  burst
+  |> should.equal([backend.Tick])
+}
+
+@target(erlang)
+pub fn poll_burst_always_returns_at_least_its_first_event_test() {
+  let events = [backend.KeyPress("a"), backend.KeyPress("b")]
+  let assert Ok(term) =
+    terminal.new(recorder(events, backend.TerminalSize(20, 3)))
+  let assert Ok(#(burst, remaining)) = terminal.poll_burst(term, 16, 0)
+
+  burst
+  |> should.equal([backend.KeyPress("a")])
+  let assert Ok(#(next, _)) = terminal.poll(remaining, 0)
+  next
+  |> should.equal(backend.KeyPress("b"))
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Building a frame
 
 @target(erlang)
