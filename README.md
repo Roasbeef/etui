@@ -239,8 +239,8 @@ On **JavaScript** (Node), the same functions return `Promise(AppResult(_))`.
 
 Each loop also has an `_adaptive` variant whose last argument is
 `fn(state) -> Int` instead of a constant timeout. It is evaluated immediately
-before every poll, so an application can stay responsive while active without
-waking at that rate while quiet:
+before every waiting poll, so an application can stay responsive while active
+without waking at that rate while quiet:
 
 ```gleam
 app.run_buffered_adaptive(
@@ -258,9 +258,16 @@ app.run_buffered_adaptive(
 )
 ```
 
-The constant-timeout APIs remain available and behave as before. Reusing the
-exact `Buffer` term from the preceding frame also skips the cell-by-cell diff;
-distinct buffers still receive the full structural comparison.
+The constant-timeout APIs remain source-compatible. Buffered loops collect up
+to 64 input events that are already waiting, apply them in order, and then draw
+the resulting state once. A tick or resize still ends the batch so animations
+and geometry changes remain frame boundaries. The low-level `run` loop keeps
+one draw per event because its render operations may be observable.
+
+Reusing the exact `Buffer` term from the preceding frame also skips the
+cell-by-cell diff; distinct buffers still receive the full structural
+comparison. Together, batching and exact frame reuse avoid both intermediate
+frames and repeated work on a final frame that has not changed.
 
 The quiet timeout is also a latency ceiling for event sources that cannot wake
 the terminal poll. An external event arriving just after a quiet poll begins
