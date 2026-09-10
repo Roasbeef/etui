@@ -33,7 +33,11 @@ enter_raw() ->
         ok                      -> ok;
         {error, already_started} -> ok;
         _                       -> ok
-    end.
+    end,
+
+    %% OTP raw mode can leave IXON enabled on macOS. The terminal would then
+    %% consume Ctrl+S/Ctrl+Q and suspend output instead of delivering keys.
+    stty("-ixon").
 
 %% Restore cooked mode via stty(1).  Drain buffered mouse/key events first
 %% so they don't leak into the shell after we exit raw mode.
@@ -44,20 +48,20 @@ exit_raw() ->
     drain_input(50),
     try_(fun() -> shell:start_interactive({noshell, cooked}) end),
     try_(fun() -> io:setopts(user, [{echo, true}, {binary, false}]) end),
-    stty_sane(),
+    stty("sane"),
     ok.
 
 %% stty acts on its standard input, and os:cmd/1 runs a command with stdin
 %% redirected from /dev/null: a bare `os:cmd("stty sane")` therefore reset the
 %% modes of /dev/null and left the terminal exactly as it was. Point it at the
 %% controlling terminal explicitly.
-stty_sane() ->
+stty(Mode) ->
     case posix() of
         false -> ok;
         true ->
             Path = shell_quote(tty_path()),
             try_(fun() ->
-                os:cmd("stty sane < " ++ Path ++ " > " ++ Path ++ " 2>/dev/null")
+                os:cmd("stty " ++ Mode ++ " < " ++ Path ++ " > " ++ Path ++ " 2>/dev/null")
             end),
             ok
     end.
