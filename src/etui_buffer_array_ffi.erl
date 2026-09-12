@@ -73,9 +73,8 @@ fill_bin(Arr, Idx, MaxIdx, Bin, St, Link, T) ->
     case string:next_grapheme(Bin) of
         [] -> Arr;
         [G | Rest] ->
-            {GBin, FirstCp} = grapheme_parts(G),
-            fill_grapheme(Arr, Idx, MaxIdx, Rest, GBin, cp_width(FirstCp),
-                          St, Link, T)
+            {GBin, W} = grapheme_parts(G),
+            fill_grapheme(Arr, Idx, MaxIdx, Rest, GBin, W, St, Link, T)
     end.
 
 %% Write one grapheme cluster at Idx.
@@ -136,8 +135,8 @@ build_row_rev(Width, Col, Bin, St, Link, T, Default, RevAcc) ->
         [] ->
             fill_rev(Width - Col, Default, RevAcc);
         [G | Rest] ->
-            {GBin, FirstCp} = grapheme_parts(G),
-            case cp_width(FirstCp) of
+            {GBin, GW} = grapheme_parts(G),
+            case GW of
                 W when W >= 2, Col + 1 >= Width ->
                     %% No room for the trailing half. Emit a blank rather than
                     %% a wide glyph that would overflow the row.
@@ -157,10 +156,26 @@ build_row_rev(Width, Col, Bin, St, Link, T, Default, RevAcc) ->
 
 %% string:next_grapheme/1 yields a bare codepoint for a single-codepoint
 %% cluster and a list for a multi-codepoint one (ZWJ sequence, flag pair).
+%%
+%% The width comes back with the binary rather than the first codepoint,
+%% because a variation selector is the second codepoint of the cluster and
+%% changes how wide the base is drawn. Handing the caller the first codepoint
+%% alone lost that, and text.gleam's grapheme_cell_width/1 would then disagree
+%% with what a fill actually laid out.
 grapheme_parts(G) when is_integer(G) ->
-    {unicode:characters_to_binary([G]), G};
-grapheme_parts([FirstCp | _] = GList) ->
-    {unicode:characters_to_binary(GList), FirstCp}.
+    {unicode:characters_to_binary([G]), cp_width(G)};
+grapheme_parts([Cp]) ->
+    {unicode:characters_to_binary([Cp]), cp_width(Cp)};
+grapheme_parts([Base, Next | _] = GList) ->
+    {unicode:characters_to_binary(GList), presentation_width(Base, Next)}.
+
+%% Width of Base once the codepoint after it has had its say. Mirrors
+%% text.gleam's presentation_width/2: U+FE0F asks for the emoji glyph (two
+%% cells), U+FE0E for the text one, and VS15 only demotes a base below
+%% U+1F000, where a text glyph exists to fall back to.
+presentation_width(_Base, 16#FE0F) -> 2;
+presentation_width(Base, 16#FE0E) when Base < 16#1F000 -> 1;
+presentation_width(Base, _Next) -> cp_width(Base).
 
 fill_rev(0, _, Acc) -> Acc;
 fill_rev(N, V, Acc) -> fill_rev(N - 1, V, [V | Acc]).
@@ -204,10 +219,81 @@ cp_width(Cp) when Cp >= 16#FFE0,
                   Cp =< 16#FFE6      -> 2;  % Fullwidth Signs
 cp_width(Cp) when Cp >= 16#1F1E6,
                   Cp =< 16#1F1FF     -> 2;  % Regional Indicators (flags)
+%% One range per emoji block rather than one blanket 1F300..1FAFF. The blanket
+%% swept in Ornamental Dingbats (1F650..1F67F), which East Asian Width calls
+%% Neutral and text.gleam leaves at one cell, so a buffer filled here and a
+%% width measured there disagreed by a column for those glyphs.
 cp_width(Cp) when Cp >= 16#1F300,
-                  Cp =< 16#1FAFF     -> 2;  % Emoji (misc/pictographs/etc.)
+                  Cp =< 16#1F5FF     -> 2;  % Misc Symbols and Pictographs
+cp_width(Cp) when Cp >= 16#1F600,
+                  Cp =< 16#1F64F     -> 2;  % Emoticons
+cp_width(Cp) when Cp >= 16#1F680,
+                  Cp =< 16#1F6FF     -> 2;  % Transport and Map Symbols
+cp_width(Cp) when Cp >= 16#1F700,
+                  Cp =< 16#1F77F     -> 2;  % Alchemical Symbols
+cp_width(Cp) when Cp >= 16#1F780,
+                  Cp =< 16#1F7FF     -> 2;  % Geometric Shapes Extended
+cp_width(Cp) when Cp >= 16#1F800,
+                  Cp =< 16#1F8FF     -> 2;  % Supplemental Arrows-C
+cp_width(Cp) when Cp >= 16#1F900,
+                  Cp =< 16#1F9FF     -> 2;  % Supplemental Symbols/Pictographs
+cp_width(Cp) when Cp >= 16#1FA00,
+                  Cp =< 16#1FAFF     -> 2;  % Symbols and Pictographs Ext-A
 cp_width(Cp) when Cp >= 16#20000,
                   Cp =< 16#2FFFD     -> 2;  % CJK Extensions B–F
 cp_width(Cp) when Cp >= 16#30000,
                   Cp =< 16#3FFFD     -> 2;  % CJK Extension G+
-cp_width(_)                           -> 1.
+%% Emoji_Presentation=Yes members of blocks that are otherwise narrow. The
+%% block cannot decide these: ☆ ★ are Ambiguous and one cell, ⚡ ✅ two. Mirrors
+%% text.gleam's emoji_presentation_width/1, which carries the whole argument
+%% and names the Unicode version the list came from.
+%% Miscellaneous Technical.
+cp_width(Cp) when Cp >= 16#231A, Cp =< 16#231B -> 2;
+cp_width(Cp) when Cp >= 16#23E9, Cp =< 16#23EC -> 2;
+cp_width(16#23F0)                              -> 2;
+cp_width(16#23F3)                              -> 2;
+%% Geometric Shapes.
+cp_width(Cp) when Cp >= 16#25FD, Cp =< 16#25FE -> 2;
+%% Miscellaneous Symbols.
+cp_width(Cp) when Cp >= 16#2614, Cp =< 16#2615 -> 2;
+cp_width(Cp) when Cp >= 16#2648, Cp =< 16#2653 -> 2;
+cp_width(16#267F)                              -> 2;
+cp_width(16#2693)                              -> 2;
+cp_width(16#26A1)                              -> 2;
+cp_width(Cp) when Cp >= 16#26AA, Cp =< 16#26AB -> 2;
+cp_width(Cp) when Cp >= 16#26BD, Cp =< 16#26BE -> 2;
+cp_width(Cp) when Cp >= 16#26C4, Cp =< 16#26C5 -> 2;
+cp_width(16#26CE)                              -> 2;
+cp_width(16#26D4)                              -> 2;
+cp_width(16#26EA)                              -> 2;
+cp_width(Cp) when Cp >= 16#26F2, Cp =< 16#26F3 -> 2;
+cp_width(16#26F5)                              -> 2;
+cp_width(16#26FA)                              -> 2;
+cp_width(16#26FD)                              -> 2;
+%% Dingbats.
+cp_width(16#2705)                              -> 2;
+cp_width(Cp) when Cp >= 16#270A, Cp =< 16#270B -> 2;
+cp_width(16#2728)                              -> 2;
+cp_width(16#274C)                              -> 2;
+cp_width(16#274E)                              -> 2;
+cp_width(Cp) when Cp >= 16#2753, Cp =< 16#2755 -> 2;
+cp_width(16#2757)                              -> 2;
+cp_width(Cp) when Cp >= 16#2795, Cp =< 16#2797 -> 2;
+cp_width(16#27B0)                              -> 2;
+cp_width(16#27BF)                              -> 2;
+%% Miscellaneous Symbols and Arrows.
+cp_width(Cp) when Cp >= 16#2B1B, Cp =< 16#2B1C -> 2;
+cp_width(16#2B50)                              -> 2;
+cp_width(16#2B55)                              -> 2;
+%% Enclosed alphanumerics and ideographs.
+cp_width(16#1F004)                             -> 2;
+cp_width(16#1F0CF)                             -> 2;
+cp_width(16#1F18E)                             -> 2;
+cp_width(Cp) when Cp >= 16#1F191, Cp =< 16#1F19A -> 2;
+cp_width(16#1F201)                             -> 2;
+cp_width(16#1F21A)                             -> 2;
+cp_width(16#1F22F)                             -> 2;
+cp_width(Cp) when Cp >= 16#1F232, Cp =< 16#1F236 -> 2;
+cp_width(Cp) when Cp >= 16#1F238, Cp =< 16#1F23A -> 2;
+cp_width(Cp) when Cp >= 16#1F250, Cp =< 16#1F251 -> 2;
+cp_width(_)                                    -> 1.

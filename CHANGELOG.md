@@ -147,6 +147,18 @@ Small, but they will not compile silently:
 
 ### Fixed
 
+- **Emoji in the Miscellaneous Symbols and Dingbats blocks were counted one
+  cell wide.** Terminals draw ✅ ❌ ❗ ⚡ ☔ ⭐ over two columns, so a buffer
+  holding one of them believed the row was a column shorter than it was, and
+  every cell after it was written one column to the left of where the cursor
+  had actually reached. An earlier fix widened the whole block and had to be
+  reverted, because ✦ ★ ◆ ☆ live there too and really are one cell. The width
+  now comes from Unicode's per-code-point `Emoji_Presentation` property, which
+  is the only thing that separates the two groups, and a variation selector
+  overrides it either way: `☺` is one cell, `☺️` is two. The Erlang fill path
+  carried a second copy of the width table; it has been brought back into
+  agreement with the first, Ornamental Dingbats included.
+
 - **A non-blocking drain could split an escape sequence into false input.** If
   a read ended between the bytes of an arrow, mouse, or modified-key sequence,
   an immediate follow-up poll treated the remainder as a completed Escape key.
