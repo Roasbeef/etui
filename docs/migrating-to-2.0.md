@@ -119,9 +119,10 @@ below.
 ### New variants in `backend.InputEvent` and `backend.RenderOp`
 
 `InputEvent` gained `MouseDrag`, `MouseMove` and `Paste`. `RenderOp` gained
-`EnableBracketedPaste` and `DisableBracketedPaste`. A `case` over either that
-was exhaustive without a `_ ->` arm no longer compiles; adding the arm, or
-handling the new events, is the whole fix.
+`EnableBracketedPaste`, `DisableBracketedPaste`, `BeginSyncUpdate` and
+`EndSyncUpdate`. A `case` over either that was exhaustive without a `_ ->` arm
+no longer compiles; adding the arm, or handling the new events, is the whole
+fix.
 
 `geometry.Flex` (which `FlexJustify` is now an alias of) gained `FlexEvenly`,
 and `geometry.Constraint` gained `FillWeighted`, with the same consequence for

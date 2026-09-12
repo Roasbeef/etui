@@ -174,6 +174,13 @@ pub fn hide_cursor(frame: Frame) -> Frame {
 /// terminal is showing is unknown, so there is nothing to diff against. Every
 /// frame after that emits only the cells that changed.
 ///
+/// A frame that emits anything is bracketed by the synchronized-update
+/// sequences, so the emulator shows the previous frame until this one is
+/// complete rather than compositing it halfway through. A frame with nothing
+/// to say still emits nothing at all: bracketing an empty list would put two
+/// escape sequences on the wire per idle poll and hold the screen for no
+/// reason.
+///
 /// Public because it is worth being able to check what a frame will emit
 /// without a terminal to emit it into, which is how the diffing and cursor
 /// rules are tested. `draw` is what an app calls.
@@ -196,17 +203,27 @@ pub fn frame_ops(
   }
   case ansi, cursor_ansi {
     "", "" -> []
-    "", only_cursor -> [backend.Write(only_cursor)]
+    "", only_cursor -> synchronized([backend.Write(only_cursor)])
     _, _ ->
       case first_frame && clear_first {
-        True -> [
-          backend.ClearScreen,
-          backend.MoveCursor(0, 0),
-          backend.Write(ansi <> cursor_ansi),
-        ]
-        False -> [backend.Write(ansi <> cursor_ansi)]
+        True ->
+          synchronized([
+            backend.ClearScreen,
+            backend.MoveCursor(0, 0),
+            backend.Write(ansi <> cursor_ansi),
+          ])
+        False -> synchronized([backend.Write(ansi <> cursor_ansi)])
       }
   }
+}
+
+/// Bracket one frame's ops so the emulator applies them all at once.
+///
+/// The clear and the cursor home of a first frame go inside the bracket along
+/// with the cells: they are as much of the frame as the text is, and a clear
+/// left outside would be the one thing the reader did see partway through.
+fn synchronized(ops: List(RenderOp)) -> List(RenderOp) {
+  [backend.BeginSyncUpdate, ..list.append(ops, [backend.EndSyncUpdate])]
 }
 
 fn blank(area: Rect) -> buffer.Buffer {

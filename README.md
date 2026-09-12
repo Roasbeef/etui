@@ -273,7 +273,9 @@ The quiet timeout is also a latency ceiling for event sources that cannot wake
 the terminal poll. An external event arriving just after a quiet poll begins
 can wait for that full timeout before the application observes it.
 
-Low-level `RenderOp` values: `Write`, `MoveCursor`, `ClearScreen`, `EnterAltScreen`, `ExitAltScreen`, `EnableMouse`, `DisableMouse`. Enable mouse with `default.new_with_mouse()`.
+Low-level `RenderOp` values: `Write`, `MoveCursor`, `ClearScreen`, `EnterAltScreen`, `ExitAltScreen`, `EnableMouse`, `DisableMouse`, `BeginSyncUpdate`, `EndSyncUpdate`. Enable mouse with `default.new_with_mouse()`.
+
+Every frame `terminal.draw` emits is bracketed by `BeginSyncUpdate` and `EndSyncUpdate` (DEC private mode 2026), so an emulator shows the previous frame until this one is complete instead of compositing it halfway through. Terminals without the mode ignore it, and a frame with nothing to emit is not bracketed.
 
 ## Examples in this repo
 

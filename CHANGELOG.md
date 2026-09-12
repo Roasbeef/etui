@@ -12,9 +12,10 @@ parser, and a Terminal you can drive from your own loop.
 Small, but they will not compile silently:
 
 - **`backend.InputEvent` gained `MouseDrag`, `MouseMove` and `Paste`**, and
-  **`backend.RenderOp` gained `EnableBracketedPaste` and
-  `DisableBracketedPaste`**. A `case` over either that was exhaustive without a
-  `_ ->` arm now fails to compile. Adding the arm is the whole fix.
+  **`backend.RenderOp` gained `EnableBracketedPaste`, `DisableBracketedPaste`,
+  `BeginSyncUpdate` and `EndSyncUpdate`**. A `case` over either that was
+  exhaustive without a `_ ->` arm now fails to compile. Adding the arm is the
+  whole fix.
 - **`geometry.split_flex` is gone; use `split_with`.** After the layout rework
   the two had the same arity, the same argument order and the same body, and
   two names for one function is not an API.
@@ -146,6 +147,15 @@ Small, but they will not compile silently:
   Ctrl+C that misdescribes what Ctrl+C does in raw mode.
 
 ### Fixed
+
+- **A frame could be composited halfway through.** `terminal.draw` wrote a
+  frame as a run of cursor moves and text, and an emulator is free to show
+  whatever has arrived so far. On a repaint that rewrites most of the viewport
+  it did, and the reader saw part of the old frame above part of the new one.
+  Every frame that emits anything is now bracketed by `BeginSyncUpdate` and
+  `EndSyncUpdate`, DEC private mode 2026, which an emulator without the mode
+  ignores; nothing probes for it, because the cost of not having it is the
+  behaviour there was before. A frame with nothing to emit is still silent.
 
 - **Emoji in the Miscellaneous Symbols and Dingbats blocks were counted one
   cell wide.** Terminals draw ✅ ❌ ❗ ⚡ ☔ ⭐ over two columns, so a buffer
