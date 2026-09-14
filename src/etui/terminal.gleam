@@ -174,6 +174,18 @@ pub fn hide_cursor(frame: Frame) -> Frame {
 /// terminal is showing is unknown, so there is nothing to diff against. Every
 /// frame after that emits only the cells that changed.
 ///
+/// A frame that emits anything is bracketed by the synchronized-update
+/// sequences, so the emulator shows the previous frame until this one is
+/// complete rather than compositing it halfway through. A frame with nothing
+/// to say still emits nothing at all: bracketing an empty list would put two
+/// escape sequences on the wire per idle poll and hold the screen for no
+/// reason.
+///
+/// `clear_first: True` declares full-screen ownership, including all columns
+/// and scroll margins. Subsequent frames may use DECSTBM and SU/SD to move
+/// rows before repairing changed cells. These sequences require an xterm-like
+/// terminal. Pass `False` for fixed or inline viewports; they use cell diffs.
+///
 /// Public because it is worth being able to check what a frame will emit
 /// without a terminal to emit it into, which is how the diffing and cursor
 /// rules are tested. `draw` is what an app calls.
@@ -184,9 +196,11 @@ pub fn frame_ops(
   cur: Cursor,
   clear_first: Bool,
 ) -> List(RenderOp) {
-  let ansi = case first_frame {
-    True -> buffer.to_ansi(curr)
-    False -> buffer.diff_to_ansi(prev, curr)
+  // Only the fullscreen viewport owns the complete rows and scroll margins.
+  let ansi = case first_frame, clear_first {
+    True, _ -> buffer.to_ansi(curr)
+    False, True -> buffer.diff_fullscreen_to_ansi(prev, curr)
+    False, False -> buffer.diff_to_ansi(prev, curr)
   }
   let cursor_ansi = case cur {
     CursorUntouched -> ""
@@ -196,17 +210,27 @@ pub fn frame_ops(
   }
   case ansi, cursor_ansi {
     "", "" -> []
-    "", only_cursor -> [backend.Write(only_cursor)]
+    "", only_cursor -> synchronized([backend.Write(only_cursor)])
     _, _ ->
       case first_frame && clear_first {
-        True -> [
-          backend.ClearScreen,
-          backend.MoveCursor(0, 0),
-          backend.Write(ansi <> cursor_ansi),
-        ]
-        False -> [backend.Write(ansi <> cursor_ansi)]
+        True ->
+          synchronized([
+            backend.ClearScreen,
+            backend.MoveCursor(0, 0),
+            backend.Write(ansi <> cursor_ansi),
+          ])
+        False -> synchronized([backend.Write(ansi <> cursor_ansi)])
       }
   }
+}
+
+/// Bracket one frame's ops so the emulator applies them all at once.
+///
+/// The clear and the cursor home of a first frame go inside the bracket along
+/// with the cells: they are as much of the frame as the text is, and a clear
+/// left outside would be the one thing the reader did see partway through.
+fn synchronized(ops: List(RenderOp)) -> List(RenderOp) {
+  [backend.BeginSyncUpdate, ..list.append(ops, [backend.EndSyncUpdate])]
 }
 
 fn blank(area: Rect) -> buffer.Buffer {
@@ -353,6 +377,8 @@ pub fn draw_with(
 ///
 /// A resize is reported like any other event, and also resets the terminal's
 /// idea of what is on screen, so the next `draw` repaints at the new size.
+/// A non-blocking poll leaves an incomplete escape sequence pending; a later
+/// waiting poll either completes the sequence or resolves a lone Escape key.
 pub fn poll(
   term: Terminal(backend_state),
   timeout_ms: Int,
@@ -360,6 +386,51 @@ pub fn poll(
   case term.backend.poll(term.state, timeout_ms) {
     Ok(#(event, bs)) -> Ok(#(event, absorb(Terminal(..term, state: bs), event)))
     Error(e) -> Error(e)
+  }
+}
+
+@target(erlang)
+/// Wait for one event, then collect immediately available input up to a bound.
+///
+/// `Resize` ends the burst after being included. A `Tick` from the first,
+/// waiting poll is delivered normally; a `Tick` from a later zero-time poll
+/// only marks the end of ready input and is not delivered early. Values below
+/// one still collect the first event. Once an event has arrived, a later poll
+/// failure ends the burst rather than discarding the events already collected.
+@internal
+pub fn poll_burst(
+  term: Terminal(backend_state),
+  timeout_ms: Int,
+  max_events: Int,
+) -> Result(#(List(InputEvent), Terminal(backend_state)), backend.Error) {
+  case poll(term, timeout_ms) {
+    Ok(#(event, polled)) ->
+      case ends_burst(event) {
+        True -> Ok(#([event], polled))
+        False -> collect_burst(polled, [event], max_events - 1)
+      }
+    Error(reason) -> Error(reason)
+  }
+}
+
+@target(erlang)
+fn collect_burst(
+  term: Terminal(backend_state),
+  events: List(InputEvent),
+  remaining: Int,
+) -> Result(#(List(InputEvent), Terminal(backend_state)), backend.Error) {
+  case remaining <= 0 {
+    True -> Ok(#(list.reverse(events), term))
+    False ->
+      case poll(term, 0) {
+        Ok(#(backend.Tick, polled)) -> Ok(#(list.reverse(events), polled))
+        Ok(#(event, polled)) ->
+          case ends_burst(event) {
+            True -> Ok(#(list.reverse([event, ..events]), polled))
+            False -> collect_burst(polled, [event, ..events], remaining - 1)
+          }
+        Error(_) -> Ok(#(list.reverse(events), term))
+      }
   }
 }
 
@@ -487,6 +558,7 @@ pub fn draw_with(
 }
 
 @target(javascript)
+/// Wait up to `timeout_ms` for an event. See the Erlang docs for details.
 pub fn poll(
   term: Terminal(backend_state),
   timeout_ms: Int,
@@ -503,10 +575,69 @@ pub fn poll(
 }
 
 @target(javascript)
+/// Wait for one event, then collect immediately available input up to a bound.
+///
+/// This has the same boundary and error semantics as the Erlang implementation.
+@internal
+pub fn poll_burst(
+  term: Terminal(backend_state),
+  timeout_ms: Int,
+  max_events: Int,
+) -> promise.Promise(
+  Result(#(List(InputEvent), Terminal(backend_state)), backend.Error),
+) {
+  promise.await(poll(term, timeout_ms), fn(result) {
+    case result {
+      Ok(#(event, polled)) ->
+        case ends_burst(event) {
+          True -> promise.resolve(Ok(#([event], polled)))
+          False -> collect_burst_js(polled, [event], max_events - 1)
+        }
+      Error(reason) -> promise.resolve(Error(reason))
+    }
+  })
+}
+
+@target(javascript)
+fn collect_burst_js(
+  term: Terminal(backend_state),
+  events: List(InputEvent),
+  remaining: Int,
+) -> promise.Promise(
+  Result(#(List(InputEvent), Terminal(backend_state)), backend.Error),
+) {
+  case remaining <= 0 {
+    True -> promise.resolve(Ok(#(list.reverse(events), term)))
+    False ->
+      promise.await(poll(term, 0), fn(result) {
+        case result {
+          Ok(#(backend.Tick, polled)) ->
+            promise.resolve(Ok(#(list.reverse(events), polled)))
+          Ok(#(event, polled)) ->
+            case ends_burst(event) {
+              True ->
+                promise.resolve(Ok(#(list.reverse([event, ..events]), polled)))
+              False ->
+                collect_burst_js(polled, [event, ..events], remaining - 1)
+            }
+          Error(_) -> promise.resolve(Ok(#(list.reverse(events), term)))
+        }
+      })
+  }
+}
+
+@target(javascript)
 pub fn restore(term: Terminal(backend_state)) -> Nil {
   let _ =
     term.backend.render(term.state, close_viewport(term.viewport, area(term)))
   term.backend.cleanup(term.state)
+}
+
+fn ends_burst(event: InputEvent) -> Bool {
+  case event {
+    backend.Tick | backend.Resize(_, _) -> True
+    _ -> False
+  }
 }
 
 // A resize invalidates everything we knew about the screen.

@@ -12,9 +12,10 @@ parser, and a Terminal you can drive from your own loop.
 Small, but they will not compile silently:
 
 - **`backend.InputEvent` gained `MouseDrag`, `MouseMove` and `Paste`**, and
-  **`backend.RenderOp` gained `EnableBracketedPaste` and
-  `DisableBracketedPaste`**. A `case` over either that was exhaustive without a
-  `_ ->` arm now fails to compile. Adding the arm is the whole fix.
+  **`backend.RenderOp` gained `EnableBracketedPaste`, `DisableBracketedPaste`,
+  `BeginSyncUpdate` and `EndSyncUpdate`**. A `case` over either that was
+  exhaustive without a `_ ->` arm now fails to compile. Adding the arm is the
+  whole fix.
 - **`geometry.split_flex` is gone; use `split_with`.** After the layout rework
   the two had the same arity, the same argument order and the same body, and
   two names for one function is not an API.
@@ -31,6 +32,20 @@ Small, but they will not compile silently:
   graphemes are still `Char`, so ordinary typing is unaffected.
 
 ### Added
+
+- **State-dependent app polling:** `run_adaptive`, `run_buffered_adaptive`,
+  `run_animated_adaptive`, and `run_buffered_cursor_adaptive` select the next
+  poll timeout from the current application state. The original APIs remain
+  source-compatible constant-timeout wrappers, and both Erlang and JavaScript
+  reevaluate the callback immediately before every waiting poll.
+
+- **Bounded input bursts:** buffered app loops apply up to 64 immediately
+  available events before drawing the resulting state. `Tick` and `Resize`
+  remain frame boundaries, and the raw render-operation loop keeps its
+  one-event-per-frame behavior. In three OTP 29 and Gleam 1.18.1 runs, the
+  committed 40-event benchmark reduced an exact cached-frame pass from
+  2.19-2.28 us to 0.44-0.50 us, and a rebuilt 200x50 frame from 34.5-35.7 ms
+  to 0.81-0.90 ms.
 
 - **`backend.restore_sequence`, `restore_ops`, `op_to_ansi` and `ops_to_ansi`:**
   one definition of what an app sends the terminal, shared by every target and
@@ -132,6 +147,44 @@ Small, but they will not compile silently:
   Ctrl+C that misdescribes what Ctrl+C does in raw mode.
 
 ### Fixed
+
+- **A frame could be composited halfway through.** `terminal.draw` wrote a
+  frame as a run of cursor moves and text, and an emulator is free to show
+  whatever has arrived so far. On a repaint that rewrites most of the viewport
+  it did, and the reader saw part of the old frame above part of the new one.
+  Every frame that emits anything is now bracketed by `BeginSyncUpdate` and
+  `EndSyncUpdate`, DEC private mode 2026, which an emulator without the mode
+  ignores; nothing probes for it, because the cost of not having it is the
+  behaviour there was before. A frame with nothing to emit is still silent.
+
+- **Emoji in the Miscellaneous Symbols and Dingbats blocks were counted one
+  cell wide.** Terminals draw ✅ ❌ ❗ ⚡ ☔ ⭐ over two columns, so a buffer
+  holding one of them believed the row was a column shorter than it was, and
+  every cell after it was written one column to the left of where the cursor
+  had actually reached. An earlier fix widened the whole block and had to be
+  reverted, because ✦ ★ ◆ ☆ live there too and really are one cell. The width
+  now comes from Unicode's per-code-point `Emoji_Presentation` property, which
+  is the only thing that separates the two groups, and a variation selector
+  overrides it either way: `☺` is one cell, `☺️` is two. The Erlang fill path
+  carried a second copy of the width table; it has been brought back into
+  agreement with the first, Ornamental Dingbats included.
+
+- **A non-blocking drain could split an escape sequence into false input.** If
+  a read ended between the bytes of an arrow, mouse, or modified-key sequence,
+  an immediate follow-up poll treated the remainder as a completed Escape key.
+  The first zero-time probe now preserves the remainder. A later empty probe
+  still resolves a standalone Escape, so an application with a zero poll
+  timeout cannot retain the key forever. JavaScript resize wakeups now carry
+  their reason separately and no longer look like input timeouts.
+
+- **JavaScript cleanup referenced parser state that no longer existed.** Both
+  backends still tried to clear the old Escape timer after parsing moved into
+  Gleam, so an otherwise normal cleanup threw `ReferenceError`.
+
+- **An application-side frame cache still paid for a whole buffer diff.** When
+  the current and previous frames are the exact same `Buffer` term, diffing now
+  stops at an identity check. Distinct buffers still take the structural path,
+  so identity remains only a positive fast path.
 
 - **The JavaScript target had none of the input work.** `node_ffi.mjs` and
   `browser_ffi.mjs` each carried a JavaScript reimplementation of the key

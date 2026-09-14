@@ -5,6 +5,13 @@ screen, mouse reporting, maybe bracketed paste, usually a hidden cursor.
 Every one of those has to be given back, including when the program ends in a
 way that runs none of its own code.
 
+On the Erlang target, raw-mode setup explicitly disables POSIX software flow
+control (`IXON`) after entering OTP's raw mode. OTP can leave it enabled on
+macOS, where the terminal consumes Ctrl+S and freezes output instead of
+delivering the `"ctrl+s"` key to the app. Ctrl+Q must likewise reach the app.
+Normal exit and the crash watchdog retain the existing `stty sane` reset,
+including restoring software flow control for the shell.
+
 ## What is sent
 
 `backend.restore_sequence()` is the whole of it, defined once and used by
@@ -63,7 +70,13 @@ device, and the interesting paths are the ones where no library code runs.
 
 ```sh
 python3 dev/pty_cleanup_check.py
+python3 dev/pty_flow_control_check.py
 ```
 
 allocates a pty, gives an app a controlling terminal on it, ends it three
 different ways, and reads back what arrived on the terminal.
+
+The flow-control check starts with `IXON` enabled, requires Ctrl+S to reach
+the real app without sending Ctrl+Q, and checks that subsequent output
+continues. It also verifies canonical mode, echo, software flow control, and
+alternate-screen restoration after normal exit, SIGKILL, and SIGINT with `+B`.

@@ -5,8 +5,11 @@
 ///   - CJK / Hangul / Hiragana / Katakana / Fullwidth: 2 cells
 ///   - Emoji (including ZWJ sequences): 2 cells (first codepoint rule)
 ///   - Combining marks, ZWJ, variation selectors, zero-width formatters: 0 cells
-///   - Ambiguous characters (Misc Symbols U+2600–26FF, Dingbats U+2700–27BF):
-///     treated as 1 cell, monospace terminals render them narrow.
+///   - Ambiguous symbols (Misc Symbols U+2600–26FF, Dingbats U+2700–27BF):
+///     1 cell, except the members of Unicode's `Emoji_Presentation` set,
+///     which every modern terminal draws as 2.
+///   - A variation selector decides the width of the symbol it follows:
+///     U+FE0F asks for the emoji glyph (2 cells), U+FE0E for the text one.
 ///
 /// Grapheme segmentation delegates to Erlang's native Unicode (UAX #29).
 /// This correctly clusters ZWJ sequences, flag pairs, and combining marks.
@@ -42,13 +45,46 @@ pub fn cell_width(s: String) -> Int {
 }
 
 /// Cell width of a single grapheme cluster.
-/// Uses the first codepoint's East Asian Width / emoji classification.
-/// Subsequent codepoints in a grapheme (combining, ZWJ, variation selectors)
-/// contribute 0, so the first determines the visible cell count.
+///
+/// The base codepoint's East Asian Width / emoji classification decides the
+/// width, and the codepoint immediately after it can override that when it is
+/// a variation selector. Everything further into the cluster (combining marks,
+/// ZWJ, the rest of a sequence) contributes nothing.
+///
+/// ```gleam
+/// grapheme_cell_width("☺")   // 1, the text glyph
+/// grapheme_cell_width("☺\u{FE0F}") // 2, VS16 asked for the emoji glyph
+/// ```
 pub fn grapheme_cell_width(g: String) -> Int {
   case string.to_utf_codepoints(g) {
     [] -> 0
-    [cp, ..] -> codepoint_cell_width(string.utf_codepoint_to_int(cp))
+    [cp] -> codepoint_cell_width(string.utf_codepoint_to_int(cp))
+
+    // A variation selector is the only codepoint in a cluster that can change
+    // how wide the base is drawn, and it is always the one straight after it.
+    [cp, next, ..] ->
+      presentation_width(
+        string.utf_codepoint_to_int(cp),
+        string.utf_codepoint_to_int(next),
+      )
+  }
+}
+
+/// Width of `base` once the codepoint after it has had its say.
+///
+/// U+FE0F (VS16) requests the emoji glyph, which is two cells wide, and U+FE0E
+/// (VS15) requests the text glyph, which is one. VS15 only demotes a base
+/// below U+1F000: above that there is no text glyph to fall back to, so a
+/// terminal draws the emoji wide whatever the selector asks for.
+fn presentation_width(base: Int, next: Int) -> Int {
+  case next {
+    0xFE0F -> 2
+    0xFE0E ->
+      case base < 0x1F000 {
+        True -> 1
+        False -> codepoint_cell_width(base)
+      }
+    _ -> codepoint_cell_width(base)
   }
 }
 
@@ -95,11 +131,11 @@ pub fn codepoint_cell_width(cp: Int) -> Int {
     n if n >= 0xFFE0 && n <= 0xFFE6 -> 2
 
     // ── Emoji ──────────────────────────────────────────────────────
-    // Note: Misc Symbols (0x2600..0x26FF) and Dingbats (0x2700..0x27BF) are
-    // NOT included here. Most chars in those ranges (✦ ★ ◆ ☆ etc.) are
-    // rendered as 1 cell in monospace terminals (Ambiguous/Neutral per
-    // Unicode East Asian Width). Treating them as 2 cells caused buffer
-    // positions to drift past the actual cursor.
+    // Misc Symbols (0x2600..0x26FF) and Dingbats (0x2700..0x27BF) are not
+    // ranges here, because the block does not decide the width: ✦ ★ ◆ ☆ are
+    // Ambiguous and one cell, ⚡ ✅ ❌ two. `emoji_presentation_width` below
+    // separates them by the per-codepoint Unicode property, which is the only
+    // thing that does.
     // Regional Indicator Symbols (flags pair into 2 cells)
     n if n >= 0x1F1E6 && n <= 0x1F1FF -> 2
     // Misc Symbols and Pictographs
@@ -122,6 +158,85 @@ pub fn codepoint_cell_width(cp: Int) -> Int {
     // CJK Extensions B, C, D, E, F, G
     n if n >= 0x20000 && n <= 0x2FFFD -> 2
     n if n >= 0x30000 && n <= 0x3FFFD -> 2
+
+    // Nothing above settled it by block, so the codepoint is one cell unless
+    // it is one of the emoji that live in an otherwise narrow block.
+    n -> emoji_presentation_width(n)
+  }
+}
+
+/// Two cells for the code points whose Unicode `Emoji_Presentation` is `Yes`
+/// and which `codepoint_cell_width` has not already made wide by block, one
+/// cell for everything else.
+///
+/// These blocks cannot be decided by range. Miscellaneous Symbols holds ☆ ★ ☎
+/// alongside ⚡ ⛔ ☔, and Dingbats holds ✦ ✓ ✗ alongside ✅ ❌ ❗; the first
+/// group is East Asian Ambiguous and one cell, the second is drawn as colour
+/// emoji two cells wide. Only the per-code-point property tells them apart, so
+/// its members are listed rather than approximated, and an earlier attempt to
+/// widen the whole block instead is what made buffer positions drift past the
+/// cursor for ✦ ★ ◆.
+///
+/// The set is Unicode 16.0's `Emoji_Presentation` (emoji-data.txt, 2024-05-01)
+/// restricted to the code points below U+1F300, since everything from there up
+/// is already wide by block above. Re-derive it from that file rather than by
+/// hand if a later Unicode version adds to it.
+fn emoji_presentation_width(cp: Int) -> Int {
+  case cp {
+    // Miscellaneous Technical: ⌚⌛ ⏩⏪⏫⏬ ⏰ ⏳
+    n if n >= 0x231A && n <= 0x231B -> 2
+    n if n >= 0x23E9 && n <= 0x23EC -> 2
+    0x23F0 -> 2
+    0x23F3 -> 2
+
+    // Geometric Shapes: ◽◾
+    n if n >= 0x25FD && n <= 0x25FE -> 2
+
+    // Miscellaneous Symbols: ☔☕ ♈♉♊♋♌♍♎♏♐♑♒♓ ♿ ⚓ ⚡ ⚪⚫ ⚽⚾ ⛄⛅ ⛎ ⛔ ⛪ ⛲⛳ ⛵ ⛺ ⛽
+    n if n >= 0x2614 && n <= 0x2615 -> 2
+    n if n >= 0x2648 && n <= 0x2653 -> 2
+    0x267F -> 2
+    0x2693 -> 2
+    0x26A1 -> 2
+    n if n >= 0x26AA && n <= 0x26AB -> 2
+    n if n >= 0x26BD && n <= 0x26BE -> 2
+    n if n >= 0x26C4 && n <= 0x26C5 -> 2
+    0x26CE -> 2
+    0x26D4 -> 2
+    0x26EA -> 2
+    n if n >= 0x26F2 && n <= 0x26F3 -> 2
+    0x26F5 -> 2
+    0x26FA -> 2
+    0x26FD -> 2
+
+    // Dingbats: ✅ ✊✋ ✨ ❌ ❎ ❓❔❕ ❗ ➕➖➗ ➰ ➿
+    0x2705 -> 2
+    n if n >= 0x270A && n <= 0x270B -> 2
+    0x2728 -> 2
+    0x274C -> 2
+    0x274E -> 2
+    n if n >= 0x2753 && n <= 0x2755 -> 2
+    0x2757 -> 2
+    n if n >= 0x2795 && n <= 0x2797 -> 2
+    0x27B0 -> 2
+    0x27BF -> 2
+
+    // Miscellaneous Symbols and Arrows: ⬛⬜ ⭐ ⭕
+    n if n >= 0x2B1B && n <= 0x2B1C -> 2
+    0x2B50 -> 2
+    0x2B55 -> 2
+
+    // Enclosed alphanumerics and ideographs: 🀄 🃏 🆎 🆑🆒🆓🆔🆕🆖🆗🆘🆙🆚 🈁 🈚 🈯 🈲🈳🈴🈵🈶 🈸🈹🈺 🉐🉑
+    0x1F004 -> 2
+    0x1F0CF -> 2
+    0x1F18E -> 2
+    n if n >= 0x1F191 && n <= 0x1F19A -> 2
+    0x1F201 -> 2
+    0x1F21A -> 2
+    0x1F22F -> 2
+    n if n >= 0x1F232 && n <= 0x1F236 -> 2
+    n if n >= 0x1F238 && n <= 0x1F23A -> 2
+    n if n >= 0x1F250 && n <= 0x1F251 -> 2
 
     _ -> 1
   }

@@ -29,6 +29,9 @@ import etui/backend.{
   EnableBracketedPaste, EnableMouse, EnterAltScreen, Resize, Tick,
 }
 @target(javascript)
+import etui/backend/pending_input
+
+@target(javascript)
 import etui/input
 
 @target(javascript)
@@ -47,6 +50,8 @@ pub type NodeState {
     rows: Int,
     /// Bytes read but not yet forming a complete escape sequence.
     pending: String,
+    /// Whether one non-blocking read has already deferred `pending`.
+    pending_deferred: Bool,
     /// Events decoded but not yet handed to the app.
     queue: List(InputEvent),
   )
@@ -112,7 +117,7 @@ fn window_size_ffi() -> Result(#(Int, Int), String) {
 
 @target(javascript)
 @external(javascript, "./node_ffi.mjs", "readChunk")
-fn read_chunk_ffi(timeout_ms: Int) -> promise.Promise(String) {
+fn read_chunk_ffi(timeout_ms: Int) -> promise.Promise(#(String, Bool)) {
   let _ = timeout_ms
   panic as "etui/backend/node requires the JavaScript target"
 }
@@ -150,7 +155,14 @@ fn init_terminal(opts: backend.Options) -> Result(NodeState, Error) {
     Ok(#(c, r)) -> #(c, r)
     Error(_) -> #(80, 24)
   }
-  let state = NodeState(cols: cols, rows: rows, pending: "", queue: [])
+  let state =
+    NodeState(
+      cols: cols,
+      rows: rows,
+      pending: "",
+      pending_deferred: False,
+      queue: [],
+    )
   register_cleanup_ffi(
     fn() {
       let _ = cleanup_terminal(state)
@@ -187,15 +199,20 @@ fn poll_input(
     [event, ..rest] ->
       promise.resolve(Ok(#(event, NodeState(..state, queue: rest))))
     [] ->
-      promise.map(read_chunk_ffi(timeout_ms), fn(chunk) {
-        let #(events, pending) = case chunk {
-          // Nothing arrived before the timeout, so a half-finished sequence is
-          // a real Escape press rather than the start of something.
-          "" -> #(input.flush(state.pending), "")
-          _ -> {
+      promise.map(read_chunk_ffi(timeout_ms), fn(read) {
+        let #(chunk, woke_for_resize) = read
+        let #(events, pending, pending_deferred) = case chunk, woke_for_resize {
+          "", True -> #([], state.pending, state.pending_deferred)
+          "", False ->
+            pending_input.after_empty_read(
+              state.pending,
+              timeout_ms,
+              state.pending_deferred,
+            )
+          _, _ -> {
             let input.Parsed(decoded, rest) =
               input.parse(state.pending <> chunk)
-            #(decoded, rest)
+            #(decoded, rest, False)
           }
         }
         let #(sized, resize) = case take_resize_ffi() {
@@ -204,7 +221,13 @@ fn poll_input(
           ])
           _ -> #(state, [])
         }
-        let next = NodeState(..sized, pending: pending, queue: [])
+        let next =
+          NodeState(
+            ..sized,
+            pending: pending,
+            pending_deferred: pending_deferred,
+            queue: [],
+          )
         case list.append(resize, events) {
           [] -> Ok(#(Tick, next))
           [event, ..rest] -> Ok(#(event, NodeState(..next, queue: rest)))
@@ -223,7 +246,13 @@ fn get_terminal_size(
   }
   Ok(#(
     backend.TerminalSize(width: cols, height: rows),
-    NodeState(cols: cols, rows: rows, pending: "", queue: []),
+    NodeState(
+      cols: cols,
+      rows: rows,
+      pending: "",
+      pending_deferred: False,
+      queue: [],
+    ),
   ))
 }
 

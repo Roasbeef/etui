@@ -166,11 +166,19 @@ pub fn main() -> Nil {
   heading("diffing, which is what a steady frame does")
   let #(before_s, after_s) = one_cell_changed(small())
   let #(before_l, after_l) = one_cell_changed(large())
-  bench("diff unchanged 80x24", 2000, fn() {
+  let small_full_copy = filled(small())
+  let large_full_copy = filled(large())
+  bench("diff same term 80x24", 20_000, fn() {
     buffer.diff_to_ansi(small_full, small_full)
   })
-  bench("diff unchanged 200x50", 500, fn() {
+  bench("diff same term 200x50", 20_000, fn() {
     buffer.diff_to_ansi(large_full, large_full)
+  })
+  bench("diff equal terms 80x24", 2000, fn() {
+    buffer.diff_to_ansi(small_full, small_full_copy)
+  })
+  bench("diff equal terms 200x50", 500, fn() {
+    buffer.diff_to_ansi(large_full, large_full_copy)
   })
   bench("diff one cell 80x24", 2000, fn() {
     buffer.diff_to_ansi(before_s, after_s)

@@ -23,6 +23,7 @@ jobs:
           node-version: "22"
       - run: gleam deps download
       - run: gleam test
+      - run: python3 dev/pty_flow_control_check.py
       # The suite has to run on JavaScript too, not just the smoke app. Several
       # buffer paths are native on Erlang and fall back to the Gleam body on
       # JavaScript, and the two silently disagreed about non-ASCII input until

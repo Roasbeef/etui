@@ -11,6 +11,14 @@
 /// | `run_animated` | a `Buffer`, and is given a ticking `anim.AnimState` |
 /// | `run_buffered_cursor` | a `Buffer` and where the hardware cursor belongs |
 ///
+/// Each loop has an `_adaptive` variant whose timeout is selected from the
+/// current application state immediately before every poll. The original
+/// functions remain constant-timeout wrappers.
+///
+/// Buffered loops also collect up to 64 immediately available events before
+/// drawing again. `Tick` and `Resize` end a burst, so time and geometry changes
+/// remain frame boundaries while queued input does not force redundant frames.
+///
 /// The three buffered loops are thin wrappers over `etui/terminal`. If you
 /// need the loop to be yours, because the terminal is not the only thing your
 /// program is doing, use that module directly.
@@ -26,6 +34,33 @@ import gleam/javascript/promise
 pub type AppResult(state) {
   Success(final_state: state)
   Error(reason: String)
+}
+
+type EventResult(state) {
+  Continue(state)
+  Quit(state)
+}
+
+fn buffered_event_limit() -> Int {
+  64
+}
+
+fn apply_events(
+  events: List(InputEvent),
+  state: state,
+  on_event: fn(InputEvent, state) -> state,
+  should_quit: fn(state) -> Bool,
+) -> EventResult(state) {
+  case events {
+    [] -> Continue(state)
+    [event, ..rest] -> {
+      let next = on_event(event, state)
+      case should_quit(next) {
+        True -> Quit(next)
+        False -> apply_events(rest, next, on_event, should_quit)
+      }
+    }
+  }
 }
 
 // Erlang try/after: runs cleanup even on panic. Returns thunk's value.
@@ -89,6 +124,26 @@ pub fn run(
   should_quit: fn(state) -> Bool,
   poll_timeout_ms: Int,
 ) -> AppResult(state) {
+  run_adaptive(b, init_state, render, on_event, should_quit, fn(_state) {
+    poll_timeout_ms
+  })
+}
+
+@target(erlang)
+/// Run the raw render-op loop with a poll timeout selected from the current
+/// application state before every poll.
+///
+/// This lets an application poll quickly while active and less often while
+/// quiet. The timeout function controls policy; etui only reevaluates it on
+/// each iteration.
+pub fn run_adaptive(
+  b: backend.Backend(backend_state),
+  init_state: state,
+  render: fn(state) -> List(RenderOp),
+  on_event: fn(InputEvent, state) -> state,
+  should_quit: fn(state) -> Bool,
+  poll_timeout_ms: fn(state) -> Int,
+) -> AppResult(state) {
   case b.init() {
     Ok(bs) ->
       // with_cleanup guarantees b.cleanup(bs) runs on both normal exit
@@ -123,11 +178,11 @@ fn loop(
   render: fn(state) -> List(RenderOp),
   on_event: fn(InputEvent, state) -> state,
   should_quit: fn(state) -> Bool,
-  poll_timeout_ms: Int,
+  poll_timeout_ms: fn(state) -> Int,
 ) -> #(state, backend_state) {
   case b.render(bs, render(state)) {
     Ok(bs2) ->
-      case b.poll(bs2, poll_timeout_ms) {
+      case b.poll(bs2, poll_timeout_ms(state)) {
         Ok(#(event, bs3)) -> {
           let next = on_event(event, state)
           case should_quit(next) {
@@ -154,7 +209,7 @@ fn drive(
   init_state: state,
   on_event: fn(InputEvent, state) -> state,
   should_quit: fn(state) -> Bool,
-  poll_timeout_ms: Int,
+  poll_timeout_ms: fn(state) -> Int,
   build: fn(Frame, state, anim.AnimState) -> Frame,
 ) -> AppResult(state) {
   case terminal.new(b) {
@@ -188,7 +243,7 @@ fn drive_loop(
   state: state,
   on_event: fn(InputEvent, state) -> state,
   should_quit: fn(state) -> Bool,
-  poll_timeout_ms: Int,
+  poll_timeout_ms: fn(state) -> Int,
   build: fn(Frame, state, anim.AnimState) -> Frame,
   anim_state: anim.AnimState,
 ) -> #(state, Terminal(backend_state)) {
@@ -196,12 +251,17 @@ fn drive_loop(
   // shadows the built-in one, so these match on Ok and fall through.
   case terminal.draw(term, fn(frame) { build(frame, state, anim_state) }) {
     Ok(drawn) ->
-      case terminal.poll(drawn, poll_timeout_ms) {
-        Ok(#(event, polled)) -> {
-          let next = on_event(event, state)
-          case should_quit(next) {
-            True -> #(next, polled)
-            False ->
+      case
+        terminal.poll_burst(
+          drawn,
+          poll_timeout_ms(state),
+          buffered_event_limit(),
+        )
+      {
+        Ok(#(events, polled)) ->
+          case apply_events(events, state, on_event, should_quit) {
+            Quit(next) -> #(next, polled)
+            Continue(next) ->
               drive_loop(
                 polled,
                 next,
@@ -212,7 +272,6 @@ fn drive_loop(
                 anim.tick(anim_state),
               )
           }
-        }
         _ -> #(state, drawn)
       }
     _ -> #(state, term)
@@ -247,6 +306,27 @@ pub fn run_buffered(
   should_quit: fn(state) -> Bool,
   poll_timeout_ms: Int,
 ) -> AppResult(state) {
+  run_buffered_adaptive(
+    b,
+    init_state,
+    render,
+    on_event,
+    should_quit,
+    fn(_state) { poll_timeout_ms },
+  )
+}
+
+@target(erlang)
+/// Like `run_buffered`, with a poll timeout selected from the current
+/// application state before every poll.
+pub fn run_buffered_adaptive(
+  b: backend.Backend(backend_state),
+  init_state: state,
+  render: fn(state, geometry.Rect) -> buffer.Buffer,
+  on_event: fn(InputEvent, state) -> state,
+  should_quit: fn(state) -> Bool,
+  poll_timeout_ms: fn(state) -> Int,
+) -> AppResult(state) {
   drive(b, init_state, on_event, should_quit, poll_timeout_ms, fn(f, s, _anim) {
     buffered_frame(f, render(s, f.area))
   })
@@ -278,6 +358,27 @@ pub fn run_animated(
   should_quit: fn(state) -> Bool,
   poll_timeout_ms: Int,
 ) -> AppResult(state) {
+  run_animated_adaptive(
+    b,
+    init_state,
+    render,
+    on_event,
+    should_quit,
+    fn(_state) { poll_timeout_ms },
+  )
+}
+
+@target(erlang)
+/// Like `run_animated`, with a poll timeout selected from the current
+/// application state before every poll.
+pub fn run_animated_adaptive(
+  b: backend.Backend(backend_state),
+  init_state: state,
+  render: fn(state, geometry.Rect, anim.AnimState) -> buffer.Buffer,
+  on_event: fn(InputEvent, state) -> state,
+  should_quit: fn(state) -> Bool,
+  poll_timeout_ms: fn(state) -> Int,
+) -> AppResult(state) {
   drive(
     b,
     init_state,
@@ -304,6 +405,28 @@ pub fn run_buffered_cursor(
   should_quit: fn(state) -> Bool,
   poll_timeout_ms: Int,
 ) -> AppResult(state) {
+  run_buffered_cursor_adaptive(
+    b,
+    init_state,
+    render,
+    on_event,
+    should_quit,
+    fn(_state) { poll_timeout_ms },
+  )
+}
+
+@target(erlang)
+/// Like `run_buffered_cursor`, with a poll timeout selected from the current
+/// application state before every poll.
+pub fn run_buffered_cursor_adaptive(
+  b: backend.Backend(backend_state),
+  init_state: state,
+  render: fn(state, geometry.Rect) ->
+    #(buffer.Buffer, Result(geometry.Position, Nil)),
+  on_event: fn(InputEvent, state) -> state,
+  should_quit: fn(state) -> Bool,
+  poll_timeout_ms: fn(state) -> Int,
+) -> AppResult(state) {
   drive(b, init_state, on_event, should_quit, poll_timeout_ms, fn(f, s, _anim) {
     cursor_frame(f, render(s, f.area))
   })
@@ -323,6 +446,26 @@ pub fn run(
   on_event: fn(InputEvent, state) -> state,
   should_quit: fn(state) -> Bool,
   poll_timeout_ms: Int,
+) -> promise.Promise(AppResult(state)) {
+  run_adaptive(b, init_state, render, on_event, should_quit, fn(_state) {
+    poll_timeout_ms
+  })
+}
+
+@target(javascript)
+/// Run the raw render-op loop with a poll timeout selected from the current
+/// application state before every poll.
+///
+/// This lets an application poll quickly while active and less often while
+/// quiet. The timeout function controls policy; etui only reevaluates it on
+/// each iteration.
+pub fn run_adaptive(
+  b: backend.AsyncBackend(backend_state),
+  init_state: state,
+  render: fn(state) -> List(RenderOp),
+  on_event: fn(InputEvent, state) -> state,
+  should_quit: fn(state) -> Bool,
+  poll_timeout_ms: fn(state) -> Int,
 ) -> promise.Promise(AppResult(state)) {
   case b.init() {
     Ok(bs) ->
@@ -359,11 +502,11 @@ fn loop_js(
   render: fn(state) -> List(RenderOp),
   on_event: fn(InputEvent, state) -> state,
   should_quit: fn(state) -> Bool,
-  poll_timeout_ms: Int,
+  poll_timeout_ms: fn(state) -> Int,
 ) -> promise.Promise(#(state, backend_state)) {
   case b.render(bs, render(state)) {
     Ok(bs2) ->
-      promise.await(b.poll(bs2, poll_timeout_ms), fn(poll_result) {
+      promise.await(b.poll(bs2, poll_timeout_ms(state)), fn(poll_result) {
         case poll_result {
           Ok(#(event, bs3)) -> {
             let next = on_event(event, state)
@@ -394,7 +537,7 @@ fn drive_js(
   init_state: state,
   on_event: fn(InputEvent, state) -> state,
   should_quit: fn(state) -> Bool,
-  poll_timeout_ms: Int,
+  poll_timeout_ms: fn(state) -> Int,
   build: fn(Frame, state, anim.AnimState) -> Frame,
 ) -> promise.Promise(AppResult(state)) {
   case terminal.new(b) {
@@ -432,33 +575,38 @@ fn drive_loop_js(
   state: state,
   on_event: fn(InputEvent, state) -> state,
   should_quit: fn(state) -> Bool,
-  poll_timeout_ms: Int,
+  poll_timeout_ms: fn(state) -> Int,
   build: fn(Frame, state, anim.AnimState) -> Frame,
   anim_state: anim.AnimState,
 ) -> promise.Promise(#(state, Terminal(backend_state))) {
   case terminal.draw(term, fn(frame) { build(frame, state, anim_state) }) {
     Ok(drawn) ->
-      promise.await(terminal.poll(drawn, poll_timeout_ms), fn(result) {
-        case result {
-          Ok(#(event, polled)) -> {
-            let next = on_event(event, state)
-            case should_quit(next) {
-              True -> promise.resolve(#(next, polled))
-              False ->
-                drive_loop_js(
-                  polled,
-                  next,
-                  on_event,
-                  should_quit,
-                  poll_timeout_ms,
-                  build,
-                  anim.tick(anim_state),
-                )
-            }
+      promise.await(
+        terminal.poll_burst(
+          drawn,
+          poll_timeout_ms(state),
+          buffered_event_limit(),
+        ),
+        fn(result) {
+          case result {
+            Ok(#(events, polled)) ->
+              case apply_events(events, state, on_event, should_quit) {
+                Quit(next) -> promise.resolve(#(next, polled))
+                Continue(next) ->
+                  drive_loop_js(
+                    polled,
+                    next,
+                    on_event,
+                    should_quit,
+                    poll_timeout_ms,
+                    build,
+                    anim.tick(anim_state),
+                  )
+              }
+            _ -> promise.resolve(#(state, drawn))
           }
-          _ -> promise.resolve(#(state, drawn))
-        }
-      })
+        },
+      )
     _ -> promise.resolve(#(state, term))
   }
 }
@@ -471,6 +619,27 @@ pub fn run_buffered(
   on_event: fn(InputEvent, state) -> state,
   should_quit: fn(state) -> Bool,
   poll_timeout_ms: Int,
+) -> promise.Promise(AppResult(state)) {
+  run_buffered_adaptive(
+    b,
+    init_state,
+    render,
+    on_event,
+    should_quit,
+    fn(_state) { poll_timeout_ms },
+  )
+}
+
+@target(javascript)
+/// Like `run_buffered`, with a poll timeout selected from the current
+/// application state before every poll.
+pub fn run_buffered_adaptive(
+  b: backend.AsyncBackend(backend_state),
+  init_state: state,
+  render: fn(state, geometry.Rect) -> buffer.Buffer,
+  on_event: fn(InputEvent, state) -> state,
+  should_quit: fn(state) -> Bool,
+  poll_timeout_ms: fn(state) -> Int,
 ) -> promise.Promise(AppResult(state)) {
   drive_js(
     b,
@@ -491,6 +660,27 @@ pub fn run_animated(
   should_quit: fn(state) -> Bool,
   poll_timeout_ms: Int,
 ) -> promise.Promise(AppResult(state)) {
+  run_animated_adaptive(
+    b,
+    init_state,
+    render,
+    on_event,
+    should_quit,
+    fn(_state) { poll_timeout_ms },
+  )
+}
+
+@target(javascript)
+/// Like `run_animated`, with a poll timeout selected from the current
+/// application state before every poll.
+pub fn run_animated_adaptive(
+  b: backend.AsyncBackend(backend_state),
+  init_state: state,
+  render: fn(state, geometry.Rect, anim.AnimState) -> buffer.Buffer,
+  on_event: fn(InputEvent, state) -> state,
+  should_quit: fn(state) -> Bool,
+  poll_timeout_ms: fn(state) -> Int,
+) -> promise.Promise(AppResult(state)) {
   drive_js(
     b,
     init_state,
@@ -510,6 +700,28 @@ pub fn run_buffered_cursor(
   on_event: fn(InputEvent, state) -> state,
   should_quit: fn(state) -> Bool,
   poll_timeout_ms: Int,
+) -> promise.Promise(AppResult(state)) {
+  run_buffered_cursor_adaptive(
+    b,
+    init_state,
+    render,
+    on_event,
+    should_quit,
+    fn(_state) { poll_timeout_ms },
+  )
+}
+
+@target(javascript)
+/// Like `run_buffered_cursor`, with a poll timeout selected from the current
+/// application state before every poll.
+pub fn run_buffered_cursor_adaptive(
+  b: backend.AsyncBackend(backend_state),
+  init_state: state,
+  render: fn(state, geometry.Rect) ->
+    #(buffer.Buffer, Result(geometry.Position, Nil)),
+  on_event: fn(InputEvent, state) -> state,
+  should_quit: fn(state) -> Bool,
+  poll_timeout_ms: fn(state) -> Int,
 ) -> promise.Promise(AppResult(state)) {
   drive_js(
     b,

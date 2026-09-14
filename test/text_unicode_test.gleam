@@ -152,6 +152,57 @@ pub fn misc_symbols_string_test() {
   text.cell_width("★✦✓") |> should.equal(3)
 }
 
+// ─── cell_width: emoji presentation in the narrow blocks ──────────
+// The same two blocks hold both kinds. The members of Unicode's
+// Emoji_Presentation set are drawn as colour emoji and take two cells; their
+// neighbours are Ambiguous text glyphs and take one. Counting an emoji as one
+// cell leaves the buffer a column ahead of the cursor for the rest of the row,
+// which is how a table's right border ended up inside its last column.
+
+pub fn emoji_presentation_symbols_are_two_cells_test() {
+  // ✅ U+2705, ❌ U+274C, ❗ U+2757 from Dingbats; ⚡ U+26A1, ☔ U+2614 from
+  // Miscellaneous Symbols; ⭐ U+2B50 from the block next door.
+  let widths = list.map(["✅", "❌", "❗", "⚡", "☔", "⭐"], text.cell_width)
+  widths
+  |> should.equal([2, 2, 2, 2, 2, 2])
+}
+
+pub fn ambiguous_neighbours_stay_one_cell_test() {
+  // These sit in the same two blocks and are not in the Emoji_Presentation
+  // set. Widening the block to catch the emoji is what broke them before.
+  let widths = list.map(["✦", "★", "☆", "◆"], text.cell_width)
+  widths
+  |> should.equal([1, 1, 1, 1])
+}
+
+pub fn a_text_presentation_symbol_is_one_cell_test() {
+  // ☺ U+263A on its own asks for the text glyph.
+  text.cell_width("\u{263A}") |> should.equal(1)
+}
+
+pub fn vs16_promotes_a_text_presentation_symbol_test() {
+  // ☺️ = U+263A U+FE0F. VS16 asks for the emoji glyph, which is two cells.
+  text.cell_width("\u{263A}\u{FE0F}") |> should.equal(2)
+}
+
+pub fn vs16_promotes_an_arrow_that_is_narrow_alone_test() {
+  // ➡ U+27A1 is Emoji=Yes but Emoji_Presentation=No, so only the selector
+  // settles it: one cell bare, two with VS16.
+  text.cell_width("\u{27A1}") |> should.equal(1)
+  text.cell_width("\u{27A1}\u{FE0F}") |> should.equal(2)
+}
+
+pub fn vs15_demotes_an_emoji_presentation_symbol_test() {
+  // ✅︎ = U+2705 U+FE0E. VS15 asks for the text glyph, which is one cell.
+  text.cell_width("\u{2705}\u{FE0E}") |> should.equal(1)
+}
+
+pub fn vs15_leaves_an_astral_emoji_wide_test() {
+  // U+1F600 has no text glyph to fall back to, so a terminal draws it wide
+  // whatever the selector asks for. Trusting VS15 here would under-count.
+  text.cell_width("\u{1F600}\u{FE0E}") |> should.equal(2)
+}
+
 // ─── cell_width: control / zero-width ─────────────────────────────
 
 pub fn zero_width_joiner_test() {

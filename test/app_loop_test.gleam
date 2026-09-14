@@ -25,25 +25,66 @@ import gleam/list
 import gleeunit/should
 
 // ─────────────────────────────────────────────────────────────────
-// Mock backend: poll replays a fixed event script, one event per frame.
+// Mock backend: poll replays a fixed event script and records frame writes.
 
 @target(erlang)
 type MockState {
-  MockState(events: List(backend.InputEvent))
+  MockState(
+    events: List(backend.InputEvent),
+    expected_timeouts: List(Int),
+    renders: Int,
+    max_renders: Int,
+  )
 }
 
 @target(erlang)
 fn mock_backend(
   events: List(backend.InputEvent),
 ) -> backend.Backend(MockState) {
+  mock_backend_with_limits(events, [], -1)
+}
+
+@target(erlang)
+fn mock_backend_with_timeouts(
+  events: List(backend.InputEvent),
+  expected_timeouts: List(Int),
+) -> backend.Backend(MockState) {
+  mock_backend_with_limits(events, expected_timeouts, -1)
+}
+
+@target(erlang)
+fn mock_backend_with_limits(
+  events: List(backend.InputEvent),
+  expected_timeouts: List(Int),
+  max_renders: Int,
+) -> backend.Backend(MockState) {
   backend.Backend(
-    init: fn() { Ok(MockState(events: events)) },
-    render: fn(s, _ops) { Ok(s) },
-    poll: fn(s, _timeout) {
-      case s.events {
-        [ev, ..rest] -> Ok(#(ev, MockState(events: rest)))
-        // Script exhausted: a poll failure ends the loop (StepQuit path).
-        [] -> Error(backend.Interrupted)
+    init: fn() {
+      Ok(MockState(
+        events: events,
+        expected_timeouts: expected_timeouts,
+        renders: 0,
+        max_renders: max_renders,
+      ))
+    },
+    render: fn(s, _ops) {
+      let renders = s.renders + 1
+      case s.max_renders >= 0 && renders > s.max_renders {
+        True -> Error(backend.IOError("too many renders"))
+        False -> Ok(MockState(..s, renders: renders))
+      }
+    },
+    poll: fn(s, timeout) {
+      let remaining = case s.expected_timeouts {
+        [] -> Ok([])
+        [expected, ..rest] if expected == timeout -> Ok(rest)
+        _ -> Error(backend.IOError("unexpected poll timeout"))
+      }
+      case remaining, s.events {
+        Ok(timeouts), [ev, ..rest] ->
+          Ok(#(ev, MockState(..s, events: rest, expected_timeouts: timeouts)))
+        // A timeout mismatch or exhausted script ends the loop.
+        _, _ -> Error(backend.Interrupted)
       }
     },
     next_size: fn(s) { Ok(#(backend.TerminalSize(80, 24), s)) },
@@ -71,6 +112,11 @@ fn count_update(ev: backend.InputEvent, m: Counter) -> Counter {
 @target(erlang)
 fn count_quit(m: Counter) -> Bool {
   m.quit
+}
+
+@target(erlang)
+fn timeout_for_count(m: Counter) -> Int {
+  100 + m.count
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -109,6 +155,24 @@ pub fn run_buffered_drives_to_quit_test() {
 }
 
 @target(erlang)
+pub fn run_buffered_coalesces_ready_input_before_redraw_test() {
+  let result =
+    app.run_buffered(
+      mock_backend_with_limits(
+        [backend.KeyPress("a"), backend.KeyPress("b"), backend.KeyPress("q")],
+        [],
+        2,
+      ),
+      Counter(count: 0, quit: False),
+      fn(_m, screen) { buffer.buffer_new(screen) },
+      count_update,
+      count_quit,
+      16,
+    )
+  result |> should.equal(app.Success(Counter(count: 2, quit: True)))
+}
+
+@target(erlang)
 pub fn run_animated_drives_to_quit_test() {
   let result =
     app.run_animated(
@@ -132,6 +196,74 @@ pub fn run_buffered_cursor_drives_to_quit_test() {
       count_update,
       count_quit,
       16,
+    )
+  result |> should.equal(app.Success(Counter(count: 1, quit: True)))
+}
+
+@target(erlang)
+pub fn run_adaptive_reevaluates_timeout_from_current_state_test() {
+  let result =
+    app.run_adaptive(
+      mock_backend_with_timeouts(
+        [backend.KeyPress("x"), backend.KeyPress("q")],
+        [100, 101],
+      ),
+      Counter(count: 0, quit: False),
+      fn(_m) { [] },
+      count_update,
+      count_quit,
+      timeout_for_count,
+    )
+  result |> should.equal(app.Success(Counter(count: 1, quit: True)))
+}
+
+@target(erlang)
+pub fn run_buffered_adaptive_reevaluates_timeout_test() {
+  let result =
+    app.run_buffered_adaptive(
+      mock_backend_with_timeouts(
+        [backend.KeyPress("x"), backend.Tick, backend.KeyPress("q")],
+        [100, 0, 101],
+      ),
+      Counter(count: 0, quit: False),
+      fn(_m, screen) { buffer.buffer_new(screen) },
+      count_update,
+      count_quit,
+      timeout_for_count,
+    )
+  result |> should.equal(app.Success(Counter(count: 1, quit: True)))
+}
+
+@target(erlang)
+pub fn run_animated_adaptive_reevaluates_timeout_test() {
+  let result =
+    app.run_animated_adaptive(
+      mock_backend_with_timeouts(
+        [backend.KeyPress("x"), backend.Tick, backend.KeyPress("q")],
+        [100, 0, 101],
+      ),
+      Counter(count: 0, quit: False),
+      fn(_m, screen, _anim) { buffer.buffer_new(screen) },
+      count_update,
+      count_quit,
+      timeout_for_count,
+    )
+  result |> should.equal(app.Success(Counter(count: 1, quit: True)))
+}
+
+@target(erlang)
+pub fn run_buffered_cursor_adaptive_reevaluates_timeout_test() {
+  let result =
+    app.run_buffered_cursor_adaptive(
+      mock_backend_with_timeouts(
+        [backend.KeyPress("x"), backend.Tick, backend.KeyPress("q")],
+        [100, 0, 101],
+      ),
+      Counter(count: 0, quit: False),
+      fn(_m, screen) { #(buffer.buffer_new(screen), Error(Nil)) },
+      count_update,
+      count_quit,
+      timeout_for_count,
     )
   result |> should.equal(app.Success(Counter(count: 1, quit: True)))
 }

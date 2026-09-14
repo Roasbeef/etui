@@ -27,13 +27,7 @@ export function setup(xtermTerminal) {
 
 export function enterRaw() {}   // xterm.js is always in "raw" mode
 
-export function exitRaw() {
-  if (escapeTimer !== null) {
-    clearTimeout(escapeTimer);
-    escapeTimer = null;
-    escapeBuffer = null;
-  }
-}
+export function exitRaw() {}
 
 export function writeStdout(s) {
   term?.write(s);
@@ -62,17 +56,17 @@ function drainResolvers() {
   }
 }
 
-/// The bytes waiting to be read, or "" if none arrived before the timeout.
+/// The bytes waiting to be read and whether a resize ended the wait.
 export async function readChunk(timeoutMs) {
-  if (inputBuffer.length > 0) return inputBuffer.shift();
-  if (resizeQueue.length > 0) return "";
+  if (inputBuffer.length > 0) return [inputBuffer.shift(), false];
+  if (resizeQueue.length > 0) return ["", true];
   const result = await Promise.race([
     new Promise((resolve) => inputResolvers.push(resolve)),
     new Promise((resolve) => setTimeout(() => resolve("timeout"), timeoutMs)),
   ]);
-  if (result === "timeout") return "";
-  if (inputBuffer.length > 0) return inputBuffer.shift();
-  return "";
+  if (result === "timeout") return ["", false];
+  if (inputBuffer.length > 0) return [inputBuffer.shift(), false];
+  return ["", resizeQueue.length > 0];
 }
 
 /// A pending resize as [cols, rows], or [].

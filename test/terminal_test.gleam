@@ -91,8 +91,26 @@ fn describe(op: backend.RenderOp) -> String {
     backend.ClearScreen -> "CLEAR"
     backend.MoveCursor(x, y) ->
       "MOVE:" <> string.inspect(x) <> "," <> string.inspect(y)
+    backend.BeginSyncUpdate -> "SYNC_BEGIN"
+    backend.EndSyncUpdate -> "SYNC_END"
     _ -> "OTHER"
   }
+}
+
+@target(erlang)
+/// A present's ops with the synchronized-update bracket taken off, having
+/// first insisted that it is there.
+///
+/// Every test below about what a frame draws goes through this, so none of
+/// them has to restate where the bracket sits and all of them fail if it goes
+/// missing. What the bracket actually puts on the wire is asserted once, in
+/// the two tests under "Synchronized output".
+fn inside_bracket(ops: List(backend.RenderOp)) -> List(backend.RenderOp) {
+  let assert [backend.BeginSyncUpdate, ..rest] = ops
+    as "a present must open with the synchronized-update begin"
+  let assert [backend.EndSyncUpdate, ..reversed_body] = list.reverse(rest)
+    as "a present must close with the synchronized-update end"
+  list.reverse(reversed_body)
 }
 
 @target(erlang)
@@ -185,17 +203,55 @@ pub fn frame_ops_repaints_in_full_on_a_first_frame_test() {
     )
   let ops =
     terminal.frame_ops(blank, filled, True, terminal.CursorUntouched, True)
-  list.map(ops, describe)
+  list.map(inside_bracket(ops), describe)
   |> list.take(2)
   |> should.equal(["CLEAR", "MOVE:0,0"])
 }
 
 @target(erlang)
-pub fn frame_ops_emits_nothing_when_nothing_changed_test() {
+pub fn frame_ops_skips_an_exact_non_empty_buffer_term_test() {
   let screen = rect_new(0, 0, 5, 1)
-  let same = buffer.buffer_new(screen)
+  let same =
+    buffer.set_string(
+      buffer.buffer_new(screen),
+      Position(0, 0),
+      "abcde",
+      style.new(style.Default, style.Default, style.none()),
+    )
   terminal.frame_ops(same, same, False, terminal.CursorUntouched, True)
   |> should.equal([])
+}
+
+@target(erlang)
+pub fn frame_ops_still_compares_distinct_buffer_terms_test() {
+  let screen = rect_new(0, 0, 5, 1)
+  let before =
+    buffer.set_string(
+      buffer.buffer_new(screen),
+      Position(0, 0),
+      "abcde",
+      style.new(style.Default, style.Default, style.none()),
+    )
+  let after =
+    buffer.set_string(
+      buffer.buffer_new(screen),
+      Position(0, 0),
+      "abXde",
+      style.new(style.Default, style.Default, style.none()),
+    )
+
+  case
+    inside_bracket(terminal.frame_ops(
+      before,
+      after,
+      False,
+      terminal.CursorUntouched,
+      True,
+    ))
+  {
+    [backend.Write(ansi)] -> string.contains(ansi, "X") |> should.equal(True)
+    _ -> should.fail()
+  }
 }
 
 @target(erlang)
@@ -218,7 +274,7 @@ pub fn frame_ops_emits_only_the_changed_cells_test() {
   let ops =
     terminal.frame_ops(before, after, False, terminal.CursorUntouched, True)
   // One write, and it carries the single changed cell rather than the row.
-  case ops {
+  case inside_bracket(ops) {
     [backend.Write(ansi)] -> {
       string.contains(ansi, "X")
       |> should.equal(True)
@@ -227,6 +283,73 @@ pub fn frame_ops_emits_only_the_changed_cells_test() {
     }
     _ -> should.fail()
   }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Synchronized output
+//
+// A frame goes out as a run of cursor moves and text, and an emulator is free
+// to composite whatever has arrived. On a repaint that rewrites most of the
+// viewport it does, and the reader sees half the old frame above half the new
+// one. These pin the bracket that stops it.
+
+@target(erlang)
+fn five_by_one() -> #(buffer.Buffer, buffer.Buffer) {
+  let screen = rect_new(0, 0, 5, 1)
+  let blank = buffer.buffer_new(screen)
+  let filled =
+    buffer.set_string(
+      blank,
+      Position(0, 0),
+      "abcde",
+      style.new(style.Default, style.Default, style.none()),
+    )
+  #(blank, filled)
+}
+
+@target(erlang)
+fn edge_ops(
+  ops: List(backend.RenderOp),
+) -> #(Result(String, Nil), Result(String, Nil)) {
+  let named = list.map(ops, describe)
+  #(list.first(named), list.last(named))
+}
+
+@target(erlang)
+pub fn a_present_opens_and_closes_with_a_synchronized_update_test() {
+  // Both kinds of present: a diff, and the full repaint of a first frame.
+  // The first frame's clear and cursor home go inside the bracket as well,
+  // which `frame_ops_repaints_in_full_on_a_first_frame_test` pins by reading
+  // them through `inside_bracket`.
+  let #(blank, filled) = five_by_one()
+  let diff =
+    terminal.frame_ops(blank, filled, False, terminal.CursorUntouched, True)
+  let repaint =
+    terminal.frame_ops(blank, filled, True, terminal.CursorUntouched, True)
+
+  #(edge_ops(diff), edge_ops(repaint))
+  |> should.equal(#(
+    #(Ok("SYNC_BEGIN"), Ok("SYNC_END")),
+    #(Ok("SYNC_BEGIN"), Ok("SYNC_END")),
+  ))
+}
+
+@target(erlang)
+pub fn the_synchronized_update_sequences_bracket_the_bytes_test() {
+  // DEC private mode 2026, which a terminal without it ignores.
+  let #(blank, filled) = five_by_one()
+  let ansi =
+    backend.ops_to_ansi(terminal.frame_ops(
+      blank,
+      filled,
+      False,
+      terminal.CursorUntouched,
+      True,
+    ))
+  string.starts_with(ansi, "\u{001B}[?2026h")
+  |> should.equal(True)
+  string.ends_with(ansi, "\u{001B}[?2026l")
+  |> should.equal(True)
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -247,6 +370,7 @@ pub fn a_hidden_cursor_still_emits_when_the_frame_is_unchanged_test() {
   let screen = rect_new(0, 0, 3, 1)
   let same = buffer.buffer_new(screen)
   terminal.frame_ops(same, same, False, terminal.CursorHidden, True)
+  |> inside_bracket
   |> should.equal([backend.Write(cursor.hide())])
 }
 
@@ -255,13 +379,13 @@ pub fn a_shown_cursor_moves_to_a_one_based_position_test() {
   let screen = rect_new(0, 0, 3, 1)
   let same = buffer.buffer_new(screen)
   case
-    terminal.frame_ops(
+    inside_bracket(terminal.frame_ops(
       same,
       same,
       False,
       terminal.CursorShown(Position(4, 2)),
       True,
-    )
+    ))
   {
     [backend.Write(ansi)] ->
       // Terminals count from 1, and rows come before columns.
@@ -299,6 +423,89 @@ pub fn an_ordinary_event_leaves_the_area_alone_test() {
   let assert Ok(#(_, after)) = terminal.poll(term, 0)
   terminal.area(after)
   |> should.equal(rect_new(0, 0, 20, 3))
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Input bursts
+
+@target(erlang)
+pub fn poll_burst_collects_ready_events_up_to_its_limit_test() {
+  let events = [
+    backend.KeyPress("a"),
+    backend.KeyPress("b"),
+    backend.KeyPress("c"),
+  ]
+  let assert Ok(term) =
+    terminal.new(recorder(events, backend.TerminalSize(20, 3)))
+  let assert Ok(#(burst, remaining)) = terminal.poll_burst(term, 16, 2)
+
+  burst
+  |> should.equal([backend.KeyPress("a"), backend.KeyPress("b")])
+  let assert Ok(#(last, _)) = terminal.poll(remaining, 0)
+  last
+  |> should.equal(backend.KeyPress("c"))
+}
+
+@target(erlang)
+pub fn poll_burst_treats_resize_as_a_frame_boundary_test() {
+  let events = [
+    backend.KeyPress("a"),
+    backend.Resize(40, 8),
+    backend.KeyPress("b"),
+  ]
+  let assert Ok(term) =
+    terminal.new(recorder(events, backend.TerminalSize(20, 3)))
+  let assert Ok(#(burst, resized)) = terminal.poll_burst(term, 16, 64)
+
+  burst
+  |> should.equal([backend.KeyPress("a"), backend.Resize(40, 8)])
+  terminal.area(resized)
+  |> should.equal(rect_new(0, 0, 40, 8))
+  let assert Ok(#(next, _)) = terminal.poll(resized, 0)
+  next
+  |> should.equal(backend.KeyPress("b"))
+}
+
+@target(erlang)
+pub fn poll_burst_uses_a_ready_tick_only_to_end_the_burst_test() {
+  let events = [
+    backend.KeyPress("a"),
+    backend.Tick,
+    backend.KeyPress("b"),
+  ]
+  let assert Ok(term) =
+    terminal.new(recorder(events, backend.TerminalSize(20, 3)))
+  let assert Ok(#(burst, remaining)) = terminal.poll_burst(term, 16, 64)
+
+  burst
+  |> should.equal([backend.KeyPress("a")])
+  let assert Ok(#(next, _)) = terminal.poll(remaining, 0)
+  next
+  |> should.equal(backend.KeyPress("b"))
+}
+
+@target(erlang)
+pub fn poll_burst_delivers_a_tick_from_the_waiting_poll_test() {
+  let assert Ok(term) =
+    terminal.new(recorder([backend.Tick], backend.TerminalSize(20, 3)))
+  let assert Ok(#(burst, _)) = terminal.poll_burst(term, 16, 64)
+
+  burst
+  |> should.equal([backend.Tick])
+}
+
+@target(erlang)
+pub fn poll_burst_always_returns_at_least_its_first_event_test() {
+  let events = [backend.KeyPress("a"), backend.KeyPress("b")]
+  let assert Ok(term) =
+    terminal.new(recorder(events, backend.TerminalSize(20, 3)))
+  let assert Ok(#(burst, remaining)) = terminal.poll_burst(term, 16, 0)
+
+  burst
+  |> should.equal([backend.KeyPress("a")])
+  let assert Ok(#(next, _)) = terminal.poll(remaining, 0)
+  next
+  |> should.equal(backend.KeyPress("b"))
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -427,7 +634,13 @@ pub fn an_inline_viewport_still_repaints_in_full_on_a_first_frame_test() {
       style.new(style.Default, style.Default, style.none()),
     )
   case
-    terminal.frame_ops(blank, filled, True, terminal.CursorUntouched, False)
+    inside_bracket(terminal.frame_ops(
+      blank,
+      filled,
+      True,
+      terminal.CursorUntouched,
+      False,
+    ))
   {
     [backend.Write(ansi)] ->
       string.contains(ansi, "abcde")

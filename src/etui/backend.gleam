@@ -20,6 +20,16 @@ pub type RenderOp {
   EnableBracketedPaste
   /// Disable bracketed paste.
   DisableBracketedPaste
+  /// Hold the screen still until `EndSyncUpdate` arrives.
+  ///
+  /// A frame is written as a run of cursor moves and text, and an emulator is
+  /// free to composite whatever has arrived so far. On a repaint that rewrites
+  /// most of the viewport it usually does, and the reader sees half the old
+  /// frame above half the new one. Between these two the emulator shows the
+  /// frame it already had and applies the whole update at once.
+  BeginSyncUpdate
+  /// Release the screen held by `BeginSyncUpdate` and show the frame.
+  EndSyncUpdate
 }
 
 /// Mouse button identifier.
@@ -164,6 +174,12 @@ pub fn op_to_ansi(op: RenderOp) -> String {
       "\u{001B}[?1007l\u{001B}[?1015l\u{001B}[?1006l\u{001B}[?1005l\u{001B}[?1003l\u{001B}[?1002l\u{001B}[?1000l"
     EnableBracketedPaste -> "\u{001B}[?2004h"
     DisableBracketedPaste -> "\u{001B}[?2004l"
+    // DEC private mode 2026. A terminal that does not implement it ignores an
+    // unknown private mode, so these go out unconditionally rather than behind
+    // a capability query: the query costs a round trip on every start-up to
+    // learn something whose absence is already harmless.
+    BeginSyncUpdate -> "\u{001B}[?2026h"
+    EndSyncUpdate -> "\u{001B}[?2026l"
   }
 }
 

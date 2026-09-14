@@ -89,6 +89,27 @@ minor releases, and did in 2.0.
 
 On the **JavaScript** target (Node), these return `Promise(AppResult(_))` instead of `AppResult`.
 
+Every loop has a matching adaptive form: `run_adaptive`,
+`run_buffered_adaptive`, `run_animated_adaptive`, and
+`run_buffered_cursor_adaptive`. Their last argument is `fn(state) -> Int`,
+evaluated from the current state immediately before each waiting poll. This is
+useful when active updates need a short timeout but quiet screens should wake
+less often. The existing functions remain constant-timeout wrappers.
+
+Treat the quiet timeout as a latency budget. An event source outside the
+terminal backend cannot necessarily wake an in-progress poll, so its first
+event after a quiet period may wait for the full timeout.
+
+Buffered loops also recognize an exact frame reuse. If a render cache returns
+the same `Buffer` term as the preceding frame, etui skips the cell diff. A
+distinct buffer always takes the structural path, even if most or all of its
+cells are equal.
+
+When input is already queued, buffered loops apply up to 64 events before they
+draw again. This preserves input order while avoiding intermediate frames that
+would be immediately replaced. A tick or resize ends the batch, and the
+low-level `run` loop continues to draw once per event.
+
 ### Keyboard handling with `keys.match`
 
 `keys.match` parses a raw key string into a typed `Key`. It avoids typos and

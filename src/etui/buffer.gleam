@@ -649,11 +649,20 @@ fn bv_cell_at(bv: BufView, row_base: Int, x: Int) -> Cell {
 
 /// Compute minimal diff between two buffers as a list of patches.
 pub fn diff(prev: Buffer, next: Buffer) -> List(BufferOp) {
-  let y_min = min_int(prev.area.position.y, next.area.position.y)
-  let y_max = max_int(geometry.bottom(prev.area), geometry.bottom(next.area))
-  let x_min = min_int(prev.area.position.x, next.area.position.x)
-  let x_max = max_int(geometry.right(prev.area), geometry.right(next.area))
-  diff_rows(buf_view(prev), buf_view(next), y_min, y_max, x_min, x_max, [])
+  case same_term(prev, next) {
+    // An app can cache a completed frame and return that exact Buffer again
+    // while nothing visible changes. Identity proves there is no diff without
+    // walking the cells; distinct terms still take the structural path below.
+    True -> []
+    False -> {
+      let y_min = min_int(prev.area.position.y, next.area.position.y)
+      let y_max =
+        max_int(geometry.bottom(prev.area), geometry.bottom(next.area))
+      let x_min = min_int(prev.area.position.x, next.area.position.x)
+      let x_max = max_int(geometry.right(prev.area), geometry.right(next.area))
+      diff_rows(buf_view(prev), buf_view(next), y_min, y_max, x_min, x_max, [])
+    }
+  }
 }
 
 fn diff_rows(
@@ -915,6 +924,248 @@ pub fn patches_to_ansi(ops: List(BufferOp)) -> String {
 /// On the first frame (or after resize) pass an empty buffer as `prev`.
 pub fn diff_to_ansi(prev: Buffer, curr: Buffer) -> String {
   patches_to_ansi(diff(prev, curr))
+}
+
+/// Diff a full terminal screen, using a vertical scroll when rows moved.
+///
+/// The caller must own the complete screen width and the terminal margins.
+/// Fixed and inline viewports must use `diff_to_ansi`: DECSTBM moves full
+/// terminal rows, including columns outside a partial-width buffer. A resize
+/// or a nonzero buffer origin takes the ordinary diff path.
+///
+/// Small shifts are searched only when most rows changed. Cell equality
+/// includes styles, hyperlinks and wide-glyph continuation cells. Unexplained
+/// rows are still diffed, and a scroll is used only when it emits fewer bytes.
+///
+/// ## Examples
+///
+/// ```gleam
+/// let ansi = diff_fullscreen_to_ansi(previous_screen, next_screen)
+/// ```
+pub fn diff_fullscreen_to_ansi(prev: Buffer, curr: Buffer) -> String {
+  let patches = diff(prev, curr)
+  let plain = patches_to_ansi(patches)
+  let rows = changed_row_count(patches, -1, 0)
+  case
+    prev.area == curr.area
+    && curr.area.position.x == 0
+    && curr.area.position.y == 0
+    && curr.area.size.height >= 6
+    && rows * 2 > curr.area.size.height
+  {
+    False -> plain
+    True -> {
+      let before = buf_view(prev)
+      let after = buf_view(curr)
+      case find_scroll(before, after, 1, 0, Error(Nil)) {
+        Error(Nil) -> plain
+        Ok(shift) -> {
+          let #(score, top, bottom) =
+            score_rows(
+              before,
+              after,
+              shift.distance,
+              int.max(0, -shift.distance),
+              int.min(after.height, after.height - shift.distance),
+              1,
+              0,
+              after.height,
+              0,
+            )
+          let region =
+            Scroll(
+              int.min(top, top + shift.distance),
+              int.max(bottom, bottom + shift.distance),
+              shift.distance,
+            )
+          let shifted = case score > 0 && bottom > top {
+            True -> scroll_to_ansi(before, after, region)
+            False -> plain
+          }
+          case string.byte_size(shifted) < string.byte_size(plain) {
+            True -> shifted
+            False -> plain
+          }
+        }
+      }
+    }
+  }
+}
+
+// A region includes both the preserved run and the rows exposed by moving it.
+// Positive distance moves content up; negative distance moves it down.
+type Scroll {
+  Scroll(top: Int, bottom: Int, distance: Int)
+}
+
+fn changed_row_count(
+  patches: List(BufferOp),
+  previous: Int,
+  count: Int,
+) -> Int {
+  case patches {
+    [] -> count
+    [Patch(position, _), ..rest] -> {
+      let added = case position.y == previous {
+        True -> 0
+        False -> 1
+      }
+      changed_row_count(rest, position.y, count + added)
+    }
+  }
+}
+
+// Sample every fourth row and eighth column to rank small shifts cheaply.
+// Sampling only selects a candidate: the final diff compares every cell, and the byte check
+// rejects a poor guess. A static sidebar can therefore share the same rows.
+fn find_scroll(
+  prev: BufView,
+  curr: BufView,
+  distance: Int,
+  best_score: Int,
+  best: Result(Scroll, Nil),
+) -> Result(Scroll, Nil) {
+  case distance > 8 || distance < -8 {
+    True -> best
+    False -> {
+      let start = int.max(0, -distance)
+      let end = int.min(curr.height, curr.height - distance)
+      let #(score, top, bottom) =
+        score_rows(prev, curr, distance, start, end, 4, 0, end, start)
+      let #(best_score, best) = case score > best_score && bottom > top {
+        True -> #(
+          score,
+          Ok(Scroll(
+            int.min(top, top + distance),
+            int.max(bottom, bottom + distance),
+            distance,
+          )),
+        )
+        False -> #(best_score, best)
+      }
+      let next = case distance > 0 {
+        True -> -distance
+        False -> 1 - distance
+      }
+      find_scroll(prev, curr, next, best_score, best)
+    }
+  }
+}
+
+fn score_rows(
+  prev: BufView,
+  curr: BufView,
+  distance: Int,
+  row: Int,
+  end: Int,
+  step: Int,
+  score: Int,
+  top: Int,
+  bottom: Int,
+) -> #(Int, Int, Int) {
+  case row >= end {
+    True -> #(score, top, bottom)
+    False -> {
+      let gain = score_row(prev, curr, row, distance, 0, 0)
+      let #(top, bottom) = case gain > 0 {
+        True -> #(int.min(top, row), row + 1)
+        False -> #(top, bottom)
+      }
+      score_rows(
+        prev,
+        curr,
+        distance,
+        row + step,
+        end,
+        step,
+        score + gain,
+        top,
+        bottom,
+      )
+    }
+  }
+}
+
+fn score_row(
+  prev: BufView,
+  curr: BufView,
+  row: Int,
+  distance: Int,
+  col: Int,
+  score: Int,
+) -> Int {
+  case col >= curr.width {
+    True -> score
+    False -> {
+      let cell = array_get(row * curr.width + col, curr.cells)
+      let moved = array_get({ row + distance } * prev.width + col, prev.cells)
+      let stayed = array_get(row * prev.width + col, prev.cells)
+      let gain = case cells_equal(cell, moved), cells_equal(cell, stayed) {
+        True, False -> 1
+        False, True -> -1
+        _, _ -> 0
+      }
+      score_row(prev, curr, row, distance, col + 8, score + gain)
+    }
+  }
+}
+
+fn scroll_to_ansi(prev: BufView, curr: BufView, shift: Scroll) -> String {
+  let direction = case shift.distance > 0 {
+    True -> "S"
+    False -> "T"
+  }
+  // Reset the rendition before scrolling so newly exposed cells have the
+  // default background used by the diff. Reset margins before absolute moves.
+  let scroll =
+    style.ansi_reset()
+    <> "\u{001B}["
+    <> int.to_string(shift.top + 1)
+    <> ";"
+    <> int.to_string(shift.bottom)
+    <> "r\u{001B}["
+    <> int.to_string(int.absolute_value(shift.distance))
+    <> direction
+    <> "\u{001B}[r"
+  scroll <> patches_to_ansi(shifted_diff(prev, curr, shift, 0, []))
+}
+
+fn shifted_diff(
+  prev: BufView,
+  curr: BufView,
+  shift: Scroll,
+  row: Int,
+  patches: List(BufferOp),
+) -> List(BufferOp) {
+  case row >= curr.height {
+    True -> list.reverse(patches)
+    False -> {
+      let source = case row >= shift.top && row < shift.bottom {
+        False -> row
+        True -> row + shift.distance
+      }
+      let before = case
+        row >= shift.top
+        && row < shift.bottom
+        && { source < shift.top || source >= shift.bottom }
+      {
+        True -> BufView(..prev, size: 0)
+        False -> prev
+      }
+      let patches =
+        diff_row(
+          before,
+          curr,
+          source * prev.width,
+          row * curr.width,
+          row,
+          0,
+          curr.width,
+          patches,
+        )
+      shifted_diff(prev, curr, shift, row + 1, patches)
+    }
+  }
 }
 
 // OSC 8 hyperlink sequences (supported by iTerm2, Kitty, VTE, Windows Terminal).

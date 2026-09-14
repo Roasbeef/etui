@@ -226,6 +226,46 @@ pub fn buffer_new_filled_keeps_non_ascii_test() {
   |> should.equal(#("漢", "<cont>", "b"))
 }
 
+pub fn an_emoji_presentation_symbol_takes_two_cells_test() {
+  // ⚡ U+26A1 is in Miscellaneous Symbols, which etui leaves narrow as a
+  // block. Counting it as one cell wrote "a" into the column the terminal
+  // draws the second half of the glyph in, and every cell after it landed one
+  // column to the left of where the cursor actually was.
+  let buf =
+    buffer.buffer_new(geometry.rect_new(0, 0, 4, 1))
+    |> buffer.set_string(
+      Position(0, 0),
+      "⚡a",
+      style.new(style.Default, style.Default, style.none()),
+    )
+  #(shape(buf, 0), shape(buf, 1), shape(buf, 2))
+  |> should.equal(#("⚡", "<cont>", "a"))
+}
+
+pub fn a_variation_selector_widens_the_symbol_it_follows_test() {
+  // ☺️ = U+263A U+FE0F, one cluster. The width lives in the second codepoint,
+  // so a fill that looked only at the first laid the cluster out one cell wide
+  // while text.cell_width said two. The Erlang fill path and the Gleam
+  // fallback both run this.
+  let buf =
+    buffer.buffer_new(geometry.rect_new(0, 0, 4, 1))
+    |> buffer.set_string(
+      Position(0, 0),
+      "\u{263A}\u{FE0F}a",
+      style.new(style.Default, style.Default, style.none()),
+    )
+  #(shape(buf, 1), shape(buf, 2))
+  |> should.equal(#("<cont>", "a"))
+}
+
+pub fn buffer_new_filled_widens_an_emoji_presentation_symbol_test() {
+  // The bulk fill builds its own cells and carried its own width table, so it
+  // needs its own assertion rather than trusting set_string's.
+  let buf = filled(geometry.rect_new(0, 0, 4, 1), "⭐b")
+  #(shape(buf, 0), shape(buf, 1), shape(buf, 2))
+  |> should.equal(#("⭐", "<cont>", "b"))
+}
+
 pub fn a_wide_grapheme_that_cannot_fit_leaves_the_cell_blank_test() {
   // Only one column left: drawing 漢 there would overflow the clip boundary.
   let buf =
