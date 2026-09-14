@@ -35,11 +35,14 @@ def run(ending):
         os.setsid()
         fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
+    # This probe creates a terminal emulator's PTY directly. Declare the
+    # emulator type rather than inheriting an unset CI TERM, which makes OTP
+    # decline its interactive raw-mode setup before etui can read input.
     app = subprocess.Popen(
         ["gleam", "run", "-m", "etui_flow_control_probe"],
         cwd=REPO, stdin=slave, stdout=slave, stderr=slave,
         preexec_fn=own_terminal,
-        env={**os.environ, "ERL_FLAGS": "+B"},
+        env={**os.environ, "ERL_FLAGS": "+B", "TERM": "xterm-256color"},
     )
     output = bytearray()
 
@@ -66,6 +69,10 @@ def run(ending):
 
     try:
         wait_for(lambda: b"FLOW_READY" in output, "first frame")
+        raw = termios.tcgetattr(master)
+        assert not raw[0] & termios.IXON
+        assert not raw[3] & termios.ICANON
+        assert not raw[3] & termios.ECHO
         os.write(master, b"\x13")
         wait_for(lambda: b"CTRL_S_RECEIVED" in output, "Ctrl+S delivery", 3)
         assert not termios.tcgetattr(master)[0] & termios.IXON
