@@ -181,6 +181,11 @@ pub fn hide_cursor(frame: Frame) -> Frame {
 /// escape sequences on the wire per idle poll and hold the screen for no
 /// reason.
 ///
+/// `clear_first: True` declares full-screen ownership, including all columns
+/// and scroll margins. Subsequent frames may use DECSTBM and SU/SD to move
+/// rows before repairing changed cells. These sequences require an xterm-like
+/// terminal. Pass `False` for fixed or inline viewports; they use cell diffs.
+///
 /// Public because it is worth being able to check what a frame will emit
 /// without a terminal to emit it into, which is how the diffing and cursor
 /// rules are tested. `draw` is what an app calls.
@@ -191,9 +196,11 @@ pub fn frame_ops(
   cur: Cursor,
   clear_first: Bool,
 ) -> List(RenderOp) {
-  let ansi = case first_frame {
-    True -> buffer.to_ansi(curr)
-    False -> buffer.diff_to_ansi(prev, curr)
+  // Only the fullscreen viewport owns the complete rows and scroll margins.
+  let ansi = case first_frame, clear_first {
+    True, _ -> buffer.to_ansi(curr)
+    False, True -> buffer.diff_fullscreen_to_ansi(prev, curr)
+    False, False -> buffer.diff_to_ansi(prev, curr)
   }
   let cursor_ansi = case cur {
     CursorUntouched -> ""
