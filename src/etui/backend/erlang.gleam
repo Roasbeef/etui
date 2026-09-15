@@ -7,6 +7,7 @@ import etui/backend.{
 import etui/backend/pending_input
 import etui/input
 import gleam/list
+import gleam/result
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -119,8 +120,15 @@ fn write_string(s: String) -> Nil {
   panic as "etui/backend/erlang requires the Erlang target"
 }
 
+// A deadline can be polled again; a closed input must end the app loop.
+// Keeping them distinct prevents EOF from becoming a stream of empty ticks.
+type ReadFailure {
+  ReadTimeout
+  InputClosed
+}
+
 @external(erlang, "etui_terminal_ffi", "read_with_timeout")
-fn read_with_timeout_ffi(timeout_ms: Int) -> Result(String, Nil) {
+fn read_with_timeout_ffi(timeout_ms: Int) -> Result(String, ReadFailure) {
   let _ = timeout_ms
   panic as "etui/backend/erlang requires the Erlang target"
 }
@@ -219,8 +227,10 @@ fn poll_input(
   case state.queue {
     [event, ..rest] -> Ok(#(event, ErlangTerminalState(..state, queue: rest)))
     [] -> {
-      let #(input_events, pending, pending_deferred) =
-        read_events(state, timeout_ms)
+      use #(input_events, pending, pending_deferred) <- result.try(read_events(
+        state,
+        timeout_ms,
+      ))
       let #(sized, resize_events) = check_resize(state)
       // Resize first: the app should lay out at the new size before it
       // processes keys that were typed during the resize. Both are delivered,
@@ -244,18 +254,19 @@ fn poll_input(
 fn read_events(
   state: ErlangTerminalState,
   timeout_ms: Int,
-) -> #(List(InputEvent), String, Bool) {
+) -> Result(#(List(InputEvent), String, Bool), Error) {
   case read_with_timeout_ffi(timeout_ms) {
     Ok(chunk) -> {
       let input.Parsed(events, pending) = input.parse(state.pending <> chunk)
-      #(events, pending, False)
+      Ok(#(events, pending, False))
     }
-    Error(_) ->
-      pending_input.after_empty_read(
+    Error(ReadTimeout) ->
+      Ok(pending_input.after_empty_read(
         state.pending,
         timeout_ms,
         state.pending_deferred,
-      )
+      ))
+    Error(InputClosed) -> Error(IOError("terminal input is closed"))
   }
 }
 
