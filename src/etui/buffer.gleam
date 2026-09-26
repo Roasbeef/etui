@@ -856,6 +856,86 @@ pub fn to_ansi(buf: Buffer) -> String {
   output <> trailing
 }
 
+/// Render each row as a self-contained styled line, for printing into the
+/// scrollback rather than painting a screen.
+///
+/// `to_ansi` positions every row with an absolute cursor move, which is right
+/// for a frame that owns the screen and wrong for output that is meant to
+/// scroll past a shell prompt, land in a pager, or be piped to a file: the
+/// moves would overwrite whatever the terminal already showed. Here no row
+/// carries a cursor move. Each starts from the default style, ends with a
+/// reset when it left one active, and drops its trailing run of empty cells,
+/// so a line can be printed, cut, or reordered without leaking colour into
+/// its neighbour. Joining the lines with newlines is the caller's choice.
+///
+/// ## Examples
+///
+/// ```gleam
+/// buffer.to_ansi_lines(buf)
+/// |> string.join("\n")
+/// |> io.println
+/// ```
+pub fn to_ansi_lines(buf: Buffer) -> List(String) {
+  let bv = buf_view(buf)
+  ansi_lines_from(bv, bv.height - 1, [])
+}
+
+// Built from the last row backwards so the accumulator comes out in order
+// without a reverse.
+fn ansi_lines_from(bv: BufView, row: Int, acc: List(String)) -> List(String) {
+  case row < 0 {
+    True -> acc
+    False -> ansi_lines_from(bv, row - 1, [ansi_line(bv, row), ..acc])
+  }
+}
+
+// A row ends at its last cell that differs from an empty one. A styled blank,
+// such as a background-filled status bar, is content and is kept.
+fn ansi_line(bv: BufView, row: Int) -> String {
+  let row_base = row * bv.width
+  let end = last_content_col(bv, row_base, bv.width - 1)
+  let #(output, final_rs) =
+    ansi_line_cells(bv, row_base, 0, end, blank_run_style(), "")
+  let trailing = case final_rs.link {
+    "" -> ""
+    _ -> osc8_close()
+  }
+  let reset = case run_style_active(final_rs) {
+    True -> style.ansi_reset()
+    False -> ""
+  }
+  output <> trailing <> reset
+}
+
+fn last_content_col(bv: BufView, row_base: Int, col: Int) -> Int {
+  case col < 0 {
+    True -> -1
+    False ->
+      case bv_cell_at(bv, row_base, bv.x0 + col) == empty_cell() {
+        True -> last_content_col(bv, row_base, col - 1)
+        False -> col
+      }
+  }
+}
+
+fn ansi_line_cells(
+  bv: BufView,
+  row_base: Int,
+  col: Int,
+  end: Int,
+  rs: RunStyle,
+  acc: String,
+) -> #(String, RunStyle) {
+  case col > end {
+    True -> #(acc, rs)
+    False -> {
+      let cell = bv_cell_at(bv, row_base, bv.x0 + col)
+      let #(s, new_rs) = emit_cell(rs, cell)
+      ansi_line_cells(bv, row_base, col + 1, end, new_rs, acc <> s)
+    }
+  }
+}
+
 fn to_ansi_rows(
   bv: BufView,
   row: Int,

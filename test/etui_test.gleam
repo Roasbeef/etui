@@ -2194,6 +2194,41 @@ pub fn to_ansi_nonempty_test() {
   result |> string.contains("abc") |> should.equal(True)
 }
 
+// Printed lines carry no cursor moves, trim the unstyled tail, and close
+// their own style so a following line starts clean.
+pub fn to_ansi_lines_scrollback_safe_test() {
+  let red = style.new(style.Indexed(1), style.Default, style.none())
+  let buf =
+    buffer.buffer_new(rect_new(0, 0, 6, 3))
+    |> buffer.set_string(Position(x: 0, y: 0), "ab", red)
+    |> buffer.set_string(Position(x: 0, y: 1), "plain", style.default_style())
+
+  let lines = buffer.to_ansi_lines(buf)
+  lines
+  |> should.equal([
+    style.ansi_fg(style.Indexed(1)) <> "ab" <> style.ansi_reset(),
+    "plain",
+    "",
+  ])
+
+  lines
+  |> list.any(fn(line) { string.contains(line, "H") })
+  |> should.equal(False)
+}
+
+// A styled blank is content: a background-filled bar keeps its width.
+pub fn to_ansi_lines_keeps_styled_blanks_test() {
+  let bar = style.new(style.Default, style.Indexed(4), style.none())
+  let buf =
+    buffer.buffer_new(rect_new(0, 0, 4, 1))
+    |> buffer.set_string(Position(x: 0, y: 0), "    ", bar)
+
+  buffer.to_ansi_lines(buf)
+  |> should.equal([
+    style.ansi_bg(style.Indexed(4)) <> "    " <> style.ansi_reset(),
+  ])
+}
+
 pub fn diff_to_ansi_identical_buffers_test() {
   let area = rect_new(0, 0, 3, 1)
   let buf =
