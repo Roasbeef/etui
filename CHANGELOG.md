@@ -273,6 +273,11 @@ Small, but they will not compile silently:
   under a marked word started one cell early. The space now carries the style
   of the span it came from, which also keeps a highlighted phrase whole rather
   than punching a hole where each space was.
+- **The styled wrapper hung on a grapheme wider than the row.** At a width of
+  1, a CJK character or an emoji fits nowhere: `span.wrap` found nothing to
+  take, requeued the same word, and never returned. A row now always takes at
+  least one grapheme, so such a grapheme gets a row to itself that overflows
+  the width by its excess. `text.wrap` already did this; the two now agree.
 - **Wrapping was quadratic in the length of a line.** `text.wrap` measured and
   rebuilt the line it was assembling on every word, which made it five times
   slower than the styled wrapper that does strictly more work.

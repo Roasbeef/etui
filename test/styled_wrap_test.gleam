@@ -5,12 +5,14 @@
 /// travel with the words rather than with the columns they started in.
 import etui/buffer
 import etui/geometry.{Position, Rect, Size}
-import etui/span.{type Line, type Text, Line, Span}
+import etui/span.{type Line, type Span, type Text, Line, Span}
 import etui/style
 import etui/text
 import etui/widgets/paragraph
+import gleam/int
 import gleam/list
 import gleam/result
+import gleam/string
 import gleeunit/should
 
 fn rendered(t: Text) -> List(String) {
@@ -317,4 +319,165 @@ pub fn a_space_inside_a_styled_span_keeps_its_style_test() {
 
   buffer.cell_bg(buffer.get_cell(buf, Position(3, 0)))
   |> should.equal(style.Indexed(4))
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Graphemes wider than the row
+//
+// A 2-cell grapheme at a width of 1 fits nowhere. The wrapper used to requeue
+// it forever, which hung the caller; a row now always takes at least one
+// grapheme, and the only row allowed past the width is one holding a single
+// grapheme wider than the row.
+
+pub fn a_wide_grapheme_at_width_one_gets_a_row_of_its_own_test() {
+  rendered(span.wrap(one(span.line_new([span.span_plain("中")])), 1))
+  |> should.equal(["中"])
+}
+
+pub fn wide_graphemes_inside_a_word_each_take_a_row_test() {
+  // The narrow graphemes either side still get rows of their own, and no
+  // empty row is left behind where the wide one could not fit.
+  rendered(span.wrap(one(span.line_new([span.span_plain("a中b漢")])), 1))
+  |> should.equal(["a", "中", "b", "漢"])
+}
+
+pub fn a_wide_word_after_a_narrow_one_at_width_one_test() {
+  rendered(span.wrap(one(span.line_new([span.span_plain("x 中文 y")])), 1))
+  |> should.equal(["x", "中", "文", "y"])
+}
+
+pub fn an_over_wide_grapheme_keeps_its_style_test() {
+  let line = span.line_new([span.span_bold("中"), span.span_plain(" a")])
+  styles_of(span.wrap(one(line), 1))
+  |> should.equal([[#("中", True)], [#("a", False)]])
+}
+
+pub fn a_wide_grapheme_at_width_zero_yields_nothing_test() {
+  span.wrap(one(span.line_new([span.span_plain("中")])), 0).lines
+  |> should.equal([])
+}
+
+pub fn a_zero_width_joiner_sequence_is_never_split_test() {
+  // A family emoji is one grapheme of several codepoints joined by ZWJ. At a
+  // width of 1 it overflows whole rather than being cut between codepoints,
+  // and at 3 two of them still cannot share a row.
+  let family = "👨\u{200D}👩\u{200D}👧"
+  rendered(span.wrap(one(span.line_new([span.span_plain(family)])), 1))
+  |> should.equal([family])
+
+  rendered(span.wrap(one(span.line_new([span.span_plain(family <> family)])), 3))
+  |> should.equal([family, family])
+}
+
+pub fn a_regional_indicator_flag_is_never_split_test() {
+  // A flag is two regional indicators forming one grapheme. Splitting it
+  // would leave two stray letters, so each flag takes a row at width 1.
+  let jp = "\u{1F1EF}\u{1F1F5}"
+  let us = "\u{1F1FA}\u{1F1F8}"
+  rendered(span.wrap(one(span.line_new([span.span_plain(jp <> us)])), 1))
+  |> should.equal([jp, us])
+}
+
+pub fn text_wrap_also_gives_a_wide_grapheme_a_row_test() {
+  // The flat wrapper already followed the same rule; this pins it.
+  text.wrap("a中b", 1)
+  |> should.equal(["a", "中", "b"])
+}
+
+// ─── Property: the wrapper terminates and loses nothing ────────────
+//
+// Random lines of mixed styles drawn from narrow, wide, joined and flag
+// graphemes, wrapped at every width from 1 to 6. Reaching the assertion at all
+// is the termination half. The rest checks that the rows carry exactly the
+// source's non-space text, in order, and that a row exceeds the width only
+// when it is a single grapheme wider than the row.
+
+const alphabet = [
+  "a", "b", "中", "漢", "👨\u{200D}👩\u{200D}👧", "\u{1F1EF}\u{1F1F5}", "e\u{0301}",
+  " ",
+]
+
+fn lcg(seed: Int) -> Int {
+  let r = { seed * 1_664_525 + 1_013_904_223 } % 2_147_483_647
+  case r < 0 {
+    True -> r + 2_147_483_647
+    False -> r
+  }
+}
+
+fn pick(seed: Int) -> String {
+  alphabet
+  |> list.drop(seed % list.length(alphabet))
+  |> list.first
+  |> result.unwrap("a")
+}
+
+// A span of one to five graphemes, bold or plain by the seed.
+fn gen_span(seed: Int) -> #(Span, Int) {
+  let s1 = lcg(seed)
+  let #(content, s2) =
+    list.fold(list.repeat(Nil, s1 % 5 + 1), #("", s1), fn(acc, _) {
+      let #(content, s) = acc
+      let next = lcg(s)
+      #(content <> pick(next), next)
+    })
+
+  let sp = case s2 % 2 {
+    0 -> span.span_plain(content)
+    _ -> span.span_bold(content)
+  }
+  #(sp, lcg(s2))
+}
+
+fn gen_line(seed: Int) -> #(Line, Int) {
+  let s1 = lcg(seed)
+  let #(spans, s2) =
+    list.fold(list.repeat(Nil, s1 % 4 + 1), #([], s1), fn(acc, _) {
+      let #(spans, s) = acc
+      let #(sp, next) = gen_span(s)
+      #([sp, ..spans], next)
+    })
+  #(span.line_new(list.reverse(spans)), s2)
+}
+
+fn line_text(l: Line) -> String {
+  list.fold(l.spans, "", fn(acc, sp) { acc <> sp.content })
+}
+
+fn check_wrap(l: Line, width: Int) -> Result(Nil, String) {
+  let source = line_text(l)
+  let rows = span.wrap_line(l, width)
+  let packed = string.concat(list.map(rows, line_text))
+  let bounded =
+    list.all(rows, fn(row) {
+      span.line_width(row) <= width
+      || list.length(string.to_graphemes(line_text(row))) == 1
+    })
+
+  let kept = string.replace(packed, " ", "") == string.replace(source, " ", "")
+  case kept && bounded {
+    True -> Ok(Nil)
+    False ->
+      Error(
+        "width " <> int.to_string(width) <> " source " <> string.inspect(source),
+      )
+  }
+}
+
+fn run_wrap(seed: Int, rem: Int) -> Result(Nil, String) {
+  case rem <= 0 {
+    True -> Ok(Nil)
+    False -> {
+      let #(l, next) = gen_line(seed)
+      use _ <- result.try(
+        list.try_each([1, 2, 3, 4, 5, 6], fn(width) { check_wrap(l, width) }),
+      )
+      run_wrap(next, rem - 1)
+    }
+  }
+}
+
+pub fn prop_wrap_terminates_and_keeps_the_text_test() {
+  run_wrap(2026, 300)
+  |> should.equal(Ok(Nil))
 }

@@ -262,6 +262,11 @@ pub fn wrap(t: Text, width: Int) -> Text {
 /// broken across rows rather than left to overflow. A word never loses its
 /// style by being moved to another row, which is the whole point: the styles
 /// travel with the words rather than with the columns they happened to be in.
+///
+/// A row always takes at least one grapheme. When a single grapheme is wider
+/// than `width` (a CJK character or an emoji at a width of 1), it gets a row
+/// to itself and that row is wider than asked, by that grapheme's excess and
+/// no more. The alternative, taking nothing, never finishes.
 pub fn wrap_line(l: Line, width: Int) -> List(Line) {
   case width <= 0 {
     True -> []
@@ -372,6 +377,15 @@ fn absorb(
   }
 }
 
+// Lay words into rows no wider than `width`, with one exception.
+//
+// Every call either consumes a word or shortens the one at the head of
+// `words`, and that is the whole termination argument. It rests on a single
+// rule: a fresh row always takes at least one grapheme, even one wider than
+// the row. Without it, a 2-cell grapheme at a width of 1 fits nowhere,
+// `split_at_width` hands back nothing, and the same word is requeued forever.
+// With it, the only row that can exceed `width` is one holding a single
+// grapheme wider than the row, since nothing is ever packed after it.
 fn pack(
   words: List(Word),
   width: Int,
@@ -426,30 +440,27 @@ fn pack(
               let #(head, tail) =
                 split_at_width(flat, width - current_width - gap)
               case head {
+                // Nothing fits in what is left of this row, so the word
+                // starts a fresh one. `take_row` is what guarantees progress
+                // here: it takes a grapheme even when that grapheme alone is
+                // wider than the row.
                 "" -> {
-                  let #(h2, t2) = split_at_width(flat, width)
+                  let #(row, left) = take_row(flat, width)
                   pack(
-                    [
-                      Word(sep: w.sep, pieces: [
-                        Piece(content: t2, style: proto),
-                      ]),
-                      ..rest
-                    ],
+                    requeue(left, w.sep, proto, rest),
                     width,
                     alignment,
-                    text.cell_width(h2),
-                    push([], h2, proto),
+                    text.cell_width(row),
+                    push([], row, proto),
                     flush(current, alignment, done),
                   )
                 }
+
+                // Part of the word fills out this row and the rest goes back
+                // on the queue to start the next one.
                 _ ->
                   pack(
-                    [
-                      Word(sep: w.sep, pieces: [
-                        Piece(content: tail, style: proto),
-                      ]),
-                      ..rest
-                    ],
+                    requeue(tail, w.sep, proto, rest),
                     width,
                     alignment,
                     0,
@@ -483,12 +494,34 @@ fn push_gap(current: List(Span), sep: Span, gap: Int) -> List(Span) {
   }
 }
 
+// Put the rest of a broken word back at the head of the queue. An empty rest
+// is dropped rather than queued: once `take_row` has taken the whole of a
+// one-grapheme word, an empty word queued behind it would open a row of its
+// own and leave a blank line.
+fn requeue(
+  left: String,
+  sep: Span,
+  proto: Span,
+  rest: List(Word),
+) -> List(Word) {
+  case left {
+    "" -> rest
+    _ -> [Word(sep: sep, pieces: [Piece(content: left, style: proto)]), ..rest]
+  }
+}
+
+// Close the row being built. A row with nothing in it is not emitted: the only
+// way to get here empty is a word whose first grapheme is wider than the whole
+// row, and that word opens the next row itself.
 fn flush(
   current: List(Span),
   alignment: text.Alignment,
   done: List(Line),
 ) -> List(Line) {
-  [Line(spans: list.reverse(current), alignment: alignment), ..done]
+  case current {
+    [] -> done
+    _ -> [Line(spans: list.reverse(current), alignment: alignment), ..done]
+  }
 }
 
 // Append to the span being built when the style matches, so a wrapped line
@@ -513,6 +546,25 @@ fn split_at_width(content: String, budget: Int) -> #(String, String) {
   case budget <= 0 {
     True -> #("", content)
     False -> take_cells(string.to_graphemes(content), budget, 0, "")
+  }
+}
+
+// Take one fresh row's worth of graphemes, and always at least one.
+//
+// `split_at_width` may take nothing, which is right for the tail end of a row
+// that is already partly full. A fresh row cannot: if it takes nothing the
+// wrapper is back where it started. So the first grapheme is taken
+// unconditionally and only the rest is measured against the budget; when that
+// first grapheme is already over it, the budget left is negative and nothing
+// else joins it.
+fn take_row(content: String, width: Int) -> #(String, String) {
+  case string.pop_grapheme(content) {
+    Error(Nil) -> #("", "")
+    Ok(#(first, rest)) -> {
+      let #(more, left) =
+        split_at_width(rest, width - text.grapheme_cell_width(first))
+      #(first <> more, left)
+    }
   }
 }
 

@@ -298,7 +298,10 @@ fn take_prefix(
 /// Tabs are expanded to spaces at 8-column tab stops before wrapping, so a
 /// tab never reaches the buffer (control characters are dropped there).
 ///
-/// Returns a list of lines, each at most `max_width` cells wide.
+/// Returns a list of lines, each at most `max_width` cells wide, with one
+/// exception: a line always takes at least one grapheme, so a grapheme wider
+/// than `max_width` (a CJK character at a width of 1) gets a line to itself
+/// and that line overflows by the grapheme's excess.
 pub fn wrap(s: String, max_width: Int) -> List(String) {
   case max_width {
     w if w <= 0 -> []
