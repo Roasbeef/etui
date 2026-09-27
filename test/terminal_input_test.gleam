@@ -74,6 +74,20 @@ pub fn a_wake_defers_a_pending_escape_as_a_zero_wait_probe_test() {
   second |> should.equal(backend.KeyPress("esc"))
 }
 
+// A lone escape byte is the Escape key once a short wait passes with nothing
+// after it, whatever the app's poll timeout. The minute-long timeout here
+// would outlast the runner's deadline if the byte waited for it.
+@target(erlang)
+pub fn a_lone_escape_resolves_without_waiting_for_the_poll_timeout_test() {
+  let #(event, state) =
+    with_silent_input(fn() {
+      let assert Ok(polled) = erlang.new().poll(quiet_state("\u{001B}"), 60_000)
+      polled
+    })
+  event |> should.equal(backend.KeyPress("esc"))
+  state.pending |> should.equal("")
+}
+
 @target(erlang)
 fn quiet_state(pending: String) -> erlang.ErlangTerminalState {
   erlang.ErlangTerminalState(

@@ -49,6 +49,12 @@ Small, but they will not compile silently:
   instead of being resolved as a lone Escape key. Each wake is one tick, so a
   sender that may wake often should pace its wakes.
 
+- **A lone Escape resolves in 40 ms (Erlang):** a lone escape byte waits at
+  most 40 ms for the rest of a sequence before it is read as the Escape key,
+  instead of waiting for the app's whole poll timeout. An app that polls
+  rarely while idle no longer answers Escape late. Longer partial sequences,
+  such as a bracketed paste arriving in chunks, keep the app's timeout.
+
 - **Bounded input bursts:** buffered app loops apply up to 64 immediately
   available events before drawing the resulting state. `Tick` and `Resize`
   remain frame boundaries, and the raw render-operation loop keeps its

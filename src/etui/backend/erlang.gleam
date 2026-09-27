@@ -6,6 +6,7 @@ import etui/backend.{
 }
 import etui/backend/pending_input
 import etui/input
+import gleam/int
 import gleam/list
 import gleam/result
 
@@ -51,6 +52,17 @@ const size_poll_active_ms = 16
 
 /// How long after the last size change to keep polling at the active rate.
 const resize_settle_ms = 400
+
+/// The longest a lone escape byte waits for the rest of a sequence before it
+/// is read as the Escape key.
+///
+/// A terminal sends an escape sequence in one write, so its bytes arrive
+/// together, and a byte that stands alone for this long was the key. Without
+/// a bound of its own the byte waited for the app's poll timeout, which is
+/// the app's idle cadence: an app that polls rarely while idle would answer
+/// Escape late. Forty milliseconds is the gap an app polling at an active
+/// cadence already allowed.
+const escape_wait_ms = 40
 
 // ─────────────────────────────────────────────────────────────────
 // Backend construction
@@ -258,6 +270,13 @@ fn read_events(
   state: ErlangTerminalState,
   timeout_ms: Int,
 ) -> Result(#(List(InputEvent), String, Bool), Error) {
+  // Only a lone escape byte is shortened. Any longer remainder, such as the
+  // start of a bracketed paste, is part of a sequence already under way and
+  // keeps the app's timeout.
+  let timeout_ms = case state.pending {
+    "\u{001B}" -> int.min(timeout_ms, escape_wait_ms)
+    _ -> timeout_ms
+  }
   case read_with_timeout_ffi(timeout_ms) {
     Ok(chunk) -> {
       let input.Parsed(events, pending) = input.parse(state.pending <> chunk)
