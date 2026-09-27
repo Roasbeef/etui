@@ -1,7 +1,7 @@
 -module(etui_terminal_ffi).
 
 -export([enter_raw/0, exit_raw/0, window_size/0, monotonic_ms/0, read_with_timeout/1,
-         install_sigint_cleanup/2, uninstall_sigint_cleanup/0,
+         wake/1, install_sigint_cleanup/2, uninstall_sigint_cleanup/0,
          write_cleanup/1, watchdog_script/3]).
 
 %% Everything below that shells out, reads /dev/tty or names a signal is
@@ -446,14 +446,31 @@ window_size() ->
     end.
 
 %% Non-blocking read via persistent actor.
+%%
+%% A wake ends the wait early without bytes. It is how another process tells
+%% the loop that something outside the keyboard needs a tick now, such as a
+%% socket frame the application reduces on its tick, instead of leaving it
+%% for the poll timeout. The loop reports it as `woken` rather than as a
+%% timeout, because the read did not wait its full timeout: a pending escape
+%% prefix must be treated as after a zero-wait probe, not resolved as a lone
+%% Escape key.
 read_with_timeout(TimeoutMs) ->
     ensure_reader(self()),
     receive
         {etui_input, Bin} -> {ok, Bin};
-        {etui_input_closed} -> {error, input_closed}
+        {etui_input_closed} -> {error, input_closed};
+        {etui_wake} -> {error, woken}
     after TimeoutMs ->
         {error, read_timeout}
     end.
+
+%% Wakes the loop running in Owner: its current or next read returns at once
+%% and the app is handed a Tick. Safe to send from any process and at any
+%% time; a wake that arrives while the loop is busy is read by its next poll,
+%% and several wakes are several ticks, so a sender should pace them.
+wake(Owner) ->
+    Owner ! {etui_wake},
+    nil.
 
 ensure_reader(Owner) ->
     case erlang:whereis(etui_kbd_reader) of

@@ -66,7 +66,7 @@ app.run_buffered(
 ```gleam
 backend.KeyPress(key)              // key string: "a", "A", " ", "\r", "ctrl+c", "shift+left"
 backend.Resize(w, h)               // terminal was resized
-backend.Tick                       // emitted each poll interval (no input)
+backend.Tick                       // a poll interval passed with no input, or the loop was woken
 backend.MousePress(x, y, button)   // optional: use default.new_with_mouse()
 backend.MouseRelease(x, y, button)
 backend.MouseDrag(x, y, button)    // moved with a button held
@@ -74,6 +74,12 @@ backend.MouseMove(x, y)            // moved with no button held
 backend.MouseScroll(x, y, up)
 backend.Paste(text)                // opt in: default.new_with_options(...)
 ```
+
+On the Erlang target another process can end a wait early: sending
+`{etui_wake}` to the loop's process (`etui_terminal_ffi:wake(Pid)` does it)
+delivers a `Tick` at once. Use it when something outside the keyboard, such
+as a socket your update reduces on `Tick`, needs the loop now rather than at
+the next poll interval. Each wake is one `Tick`, so pace them at the sender.
 
 A `case` over `InputEvent` needs a `_ ->` arm: the type gains variants in
 minor releases, and did in 2.0.

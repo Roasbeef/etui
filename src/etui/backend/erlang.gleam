@@ -122,9 +122,12 @@ fn write_string(s: String) -> Nil {
 
 // A deadline can be polled again; a closed input must end the app loop.
 // Keeping them distinct prevents EOF from becoming a stream of empty ticks.
+// A wake is a third outcome: the read returned without bytes before its
+// timeout, because another process asked the loop for a tick.
 type ReadFailure {
   ReadTimeout
   InputClosed
+  Woken
 }
 
 @external(erlang, "etui_terminal_ffi", "read_with_timeout")
@@ -264,6 +267,18 @@ fn read_events(
       Ok(pending_input.after_empty_read(
         state.pending,
         timeout_ms,
+        state.pending_deferred,
+      ))
+
+    // A wake returns before the timeout, so the read waited for no bytes.
+    // Treating it as the full timeout would resolve a pending escape prefix
+    // as a lone Escape key while the rest of its sequence, or a paste's next
+    // chunk, is still on its way. It is judged as a zero-wait probe instead:
+    // the first defers the prefix and a second resolves it.
+    Error(Woken) ->
+      Ok(pending_input.after_empty_read(
+        state.pending,
+        0,
         state.pending_deferred,
       ))
     Error(InputClosed) -> Error(IOError("terminal input is closed"))

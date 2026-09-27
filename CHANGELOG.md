@@ -39,6 +39,16 @@ Small, but they will not compile silently:
   source-compatible constant-timeout wrappers, and both Erlang and JavaScript
   reevaluate the callback immediately before every waiting poll.
 
+- **Waking the loop from another process (Erlang):** sending `{etui_wake}`
+  to the process that runs an app loop, or calling
+  `etui_terminal_ffi:wake(Pid)`, ends its current or next input wait at once
+  and hands the app a `Tick`. An application that reduces socket traffic on
+  its tick can then poll with a long timeout and still react to a frame as it
+  arrives. A wake is read as a zero-wait probe rather than as a timeout, so an
+  escape prefix still waiting for the rest of its sequence is deferred once
+  instead of being resolved as a lone Escape key. Each wake is one tick, so a
+  sender that may wake often should pace its wakes.
+
 - **Bounded input bursts:** buffered app loops apply up to 64 immediately
   available events before drawing the resulting state. `Tick` and `Resize`
   remain frame boundaries, and the raw render-operation loop keeps its
