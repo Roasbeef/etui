@@ -379,13 +379,13 @@ fn absorb(
 
 // Lay words into rows no wider than `width`, with one exception.
 //
-// Every call either consumes a word or shortens the one at the head of
-// `words`, and that is the whole termination argument. It rests on a single
-// rule: a fresh row always takes at least one grapheme, even one wider than
-// the row. Without it, a 2-cell grapheme at a width of 1 fits nowhere,
-// `split_at_width` hands back nothing, and the same word is requeued forever.
-// With it, the only row that can exceed `width` is one holding a single
-// grapheme wider than the row, since nothing is ever packed after it.
+// Every call consumes one word, and a word wider than any row is broken by
+// `break_rows` in the same call rather than put back on the queue piece by
+// piece. `break_rows` rests on a single rule: a fresh row always takes at least
+// one grapheme, even one wider than the row. Without it, a 2-cell grapheme at a
+// width of 1 fits nowhere and the word never shrinks. With it, the only row
+// that can exceed `width` is one holding a single grapheme wider than the row,
+// since nothing is ever packed after it.
 fn pack(
   words: List(Word),
   width: Int,
@@ -436,42 +436,40 @@ fn pack(
                 [Piece(style: st, ..), ..] -> st
                 [] -> span_plain("")
               }
-              let flat = word_text(w)
-              let #(head, tail) =
-                split_at_width(flat, width - current_width - gap)
-              case head {
-                // Nothing fits in what is left of this row, so the word
-                // starts a fresh one. `take_row` is what guarantees progress
-                // here: it takes a grapheme even when that grapheme alone is
-                // wider than the row.
-                "" -> {
-                  let #(row, left) = take_row(flat, width)
-                  pack(
-                    requeue(left, w.sep, proto, rest),
-                    width,
-                    alignment,
-                    text.cell_width(row),
-                    push([], row, proto),
-                    flush(current, alignment, done),
-                  )
-                }
+              let graphemes = string.to_graphemes(word_text(w))
+              let #(head, _, left) =
+                take_fitting(graphemes, width - current_width - gap, 0, [])
 
-                // Part of the word fills out this row and the rest goes back
-                // on the queue to start the next one.
-                _ ->
-                  pack(
-                    requeue(tail, w.sep, proto, rest),
-                    width,
+              // The word's graphemes are split into rows in one pass. Measuring
+              // and re-joining the rest of the word for every row, as this
+              // once did by requeueing the remainder as a new word, made a long
+              // unbroken run cost time quadratic in its length.
+              let #(started, remaining) = case head {
+                // Nothing fits in what is left of this row, so the word
+                // starts a fresh one.
+                [] -> #(flush(current, alignment, done), graphemes)
+
+                // Part of the word fills out this row, behind the space that
+                // preceded it, and the rest starts the next one.
+                _ -> #(
+                  flush(
+                    push(push_gap(current, w.sep, gap), join(head), proto),
                     alignment,
-                    0,
-                    [],
-                    flush(
-                      push(push_gap(current, w.sep, gap), head, proto),
-                      alignment,
-                      done,
-                    ),
-                  )
+                    done,
+                  ),
+                  left,
+                )
               }
+
+              // Every row but the last is closed here. The last stays open,
+              // so the next word can join it when there is room.
+              let #(closed, last, last_width) =
+                break_rows(remaining, width, proto, alignment, started)
+              let open = case last {
+                "" -> []
+                _ -> push([], last, proto)
+              }
+              pack(rest, width, alignment, last_width, open, closed)
             }
           }
       }
@@ -491,22 +489,6 @@ fn push_gap(current: List(Span), sep: Span, gap: Int) -> List(Span) {
   case gap {
     0 -> current
     _ -> push(current, " ", sep)
-  }
-}
-
-// Put the rest of a broken word back at the head of the queue. An empty rest
-// is dropped rather than queued: once `take_row` has taken the whole of a
-// one-grapheme word, an empty word queued behind it would open a row of its
-// own and leave a blank line.
-fn requeue(
-  left: String,
-  sep: Span,
-  proto: Span,
-  rest: List(Word),
-) -> List(Word) {
-  case left {
-    "" -> rest
-    _ -> [Word(sep: sep, pieces: [Piece(content: left, style: proto)]), ..rest]
   }
 }
 
@@ -541,47 +523,70 @@ fn same_style(a: Span, b: Span) -> Bool {
   a.style == b.style && a.link == b.link
 }
 
-// Take as many graphemes as fit in `budget` cells.
-fn split_at_width(content: String, budget: Int) -> #(String, String) {
-  case budget <= 0 {
-    True -> #("", content)
-    False -> take_cells(string.to_graphemes(content), budget, 0, "")
-  }
-}
-
-// Take one fresh row's worth of graphemes, and always at least one.
+// Take graphemes from the front of `graphemes` while they fit in `budget`
+// cells, `used` of which are already spent. Returns what was taken, newest
+// first, the cells used, and what is left.
 //
-// `split_at_width` may take nothing, which is right for the tail end of a row
-// that is already partly full. A fresh row cannot: if it takes nothing the
-// wrapper is back where it started. So the first grapheme is taken
-// unconditionally and only the rest is measured against the budget; when that
-// first grapheme is already over it, the budget left is negative and nothing
-// else joins it.
-fn take_row(content: String, width: Int) -> #(String, String) {
-  case string.pop_grapheme(content) {
-    Error(Nil) -> #("", "")
-    Ok(#(first, rest)) -> {
-      let #(more, left) =
-        split_at_width(rest, width - text.grapheme_cell_width(first))
-      #(first <> more, left)
-    }
-  }
-}
-
-fn take_cells(
+// This may take nothing, which is right for the tail end of a row that is
+// already partly full. A budget of zero or less takes nothing at all, not even
+// a zero-width grapheme.
+fn take_fitting(
   graphemes: List(String),
   budget: Int,
   used: Int,
-  head: String,
-) -> #(String, String) {
+  taken: List(String),
+) -> #(List(String), Int, List(String)) {
   case graphemes {
-    [] -> #(head, "")
+    [] -> #(taken, used, [])
     [g, ..rest] -> {
       let w = text.grapheme_cell_width(g)
-      case used + w > budget {
-        True -> #(head, string.concat([g, ..rest]))
-        False -> take_cells(rest, budget, used + w, head <> g)
+      case budget > 0 && used + w <= budget {
+        True -> take_fitting(rest, budget, used + w, [g, ..taken])
+        False -> #(taken, used, graphemes)
       }
     }
   }
+}
+
+// Split the rest of a broken word into rows of `width` cells, closing each one
+// onto `done` except the last, which comes back with its width so the caller
+// can keep it open.
+//
+// Every row takes its first grapheme unconditionally and then fills up to
+// `width` cells. A fresh row that took nothing would never finish; this way, a
+// grapheme wider than the row gets a row to itself, since nothing else fits
+// after it. A zero-width grapheme still fits in a row that is exactly full, so
+// it stays on the row with the grapheme before it.
+//
+// Each grapheme is measured once and each row joined once, so the whole word
+// costs time linear in its length.
+fn break_rows(
+  graphemes: List(String),
+  width: Int,
+  proto: Span,
+  alignment: text.Alignment,
+  done: List(Line),
+) -> #(List(Line), String, Int) {
+  case graphemes {
+    [] -> #(done, "", 0)
+    [first, ..rest] -> {
+      let first_width = text.grapheme_cell_width(first)
+      let #(taken, used, left) = take_fitting(rest, width, first_width, [first])
+      let row = join(taken)
+
+      case left {
+        [] -> #(done, row, used)
+        _ ->
+          break_rows(left, width, proto, alignment, [
+            Line(spans: [Span(..proto, content: row)], alignment: alignment),
+            ..done
+          ])
+      }
+    }
+  }
+}
+
+// Join graphemes collected newest first.
+fn join(taken: List(String)) -> String {
+  string.concat(list.reverse(taken))
 }

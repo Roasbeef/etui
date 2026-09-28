@@ -278,6 +278,15 @@ Small, but they will not compile silently:
   take, requeued the same word, and never returned. A row now always takes at
   least one grapheme, so such a grapheme gets a row to itself that overflows
   the width by its excess. `text.wrap` already did this; the two now agree.
+- **The styled wrapper was quadratic in the length of a long word.** A word
+  wider than the row was broken one row at a time, and each row measured and
+  re-joined all of the word left after it. A 50,000-character word took about
+  two seconds at a width of 80, and a caller that re-wraps streamed text on
+  every update paid that on every frame. The word is now split into rows in
+  one pass over its graphemes and takes 8 ms. The rows are the same as before,
+  except that a zero-width grapheme at the end of a full row now always stays
+  on that row; it used to move to the next row in some cases, and could get a
+  blank row of its own.
 - **Wrapping was quadratic in the length of a line.** `text.wrap` measured and
   rebuilt the line it was assembling on every word, which made it five times
   slower than the styled wrapper that does strictly more work.
