@@ -14,6 +14,7 @@ Guides for using the library. API details also live in `///` doc comments on eac
 | [Focus](focus.md) | `FocusRing` for multi-panel UIs |
 | [Migrating to 2.0](migrating-to-2.0.md) | What changed from 1.x, what breaks, and what does not |
 | [Terminal state](terminal-state.md) | What is restored on the way out, and what happens when nothing gets to run |
+| [Inline images](graphics.md) | Probing for kitty and iTerm2 graphics, placeholder cells, OSC 1337 |
 
 ## Targets
 
