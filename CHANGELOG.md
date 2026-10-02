@@ -33,6 +33,25 @@ Small, but they will not compile silently:
 
 ### Added
 
+- **Inline images (`etui/graphics`):** a capability probe and kitty and
+  iTerm2 image output. `probe.query` and a pure reply parser (`probe.feed`,
+  `probe.capabilities`) find kitty graphics by a one-pixel `a=q` query
+  followed by DA1, believed only from kitty and Ghostty (the terminals known
+  to implement Unicode placeholders), iTerm2 by its XTVERSION name, and the cell size from
+  `CSI 16 t` or `CSI 14 t` over `CSI 18 t`; only positive answers count.
+  `probe.run` does the round trip on Erlang within a caller's deadline.
+  `kitty.transmit`, `place` and `delete` speak the protocol in quiet mode,
+  and `kitty.render` draws Unicode placeholder cells, so an image moves,
+  clips and diffs like text. `iterm2.draw_at` and `erase` are the OSC 1337
+  fallback. `graphics.fit` sizes a box from the image's pixel size. See
+  [Inline images](docs/graphics.md) and `examples/image`.
+- **Terminal replies are not keys:** `etui/input` drops the six replies the
+  graphics probe asks for when they arrive late, instead of delivering them
+  as a burst of key presses.
+- **`buffer.set_cells`:** many single-column writes in one pass, which keeps
+  wide graphemes cut by the written area whole and copies the JavaScript cell
+  store once.
+
 - **State-dependent app polling:** `run_adaptive`, `run_buffered_adaptive`,
   `run_animated_adaptive`, and `run_buffered_cursor_adaptive` select the next
   poll timeout from the current application state. The original APIs remain

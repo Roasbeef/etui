@@ -353,6 +353,73 @@ pub fn set_cell(buffer: Buffer, pos: geometry.Position, cell: Cell) -> Buffer {
   }
 }
 
+/// Set many single-column cells at once. Out-of-bounds writes are ignored.
+///
+/// Two things `set_cell` in a loop does not do. It copies the cell store once
+/// rather than once per cell, which on JavaScript is the difference between
+/// linear and quadratic in the buffer's size. And it keeps wide graphemes
+/// whole: a cell written over either half of a wide grapheme blanks the other
+/// half, because an orphaned half shifts the rest of the row when it is drawn
+/// (an orphan continuation draws nothing, an orphan wide cell draws over its
+/// neighbour). A box drawn over CJK text therefore cuts it cleanly at both
+/// edges.
+///
+/// The cells are written in list order, and each is meant to be one column
+/// wide; a wide cell here gets no continuation of its own.
+///
+/// ## Examples
+///
+/// ```gleam
+/// buffer.set_cells(buf, [
+///   #(geometry.Position(0, 0), cell_a),
+///   #(geometry.Position(1, 0), cell_b),
+/// ])
+/// ```
+pub fn set_cells(
+  buffer: Buffer,
+  cells: List(#(geometry.Position, Cell)),
+) -> Buffer {
+  let area = buffer.area
+  let written =
+    list.fold(cells, draft(buffer.cells), fn(d, write) {
+      let #(pos, cell) = write
+      case geometry.contains(area, pos) {
+        False -> d
+        True -> {
+          let idx = pos_to_idx(area, pos)
+          d
+          |> unpair(area, pos, draft_get(idx, d))
+          |> draft_set(idx, Cell(..cell, style: style.resolve(cell.style)), _)
+        }
+      }
+    })
+  Buffer(..buffer, cells: commit(written))
+}
+
+// Blank the other half of the wide grapheme `old` belonged to, if it did.
+// Called before `old`'s cell is overwritten, so the half that remains cannot
+// be drawn on its own.
+fn unpair(
+  d: Draft,
+  area: geometry.Rect,
+  pos: geometry.Position,
+  old: Cell,
+) -> Draft {
+  case old.content {
+    Continuation -> blank_at(d, area, geometry.Position(..pos, x: pos.x - 1))
+    Content(width: w, ..) if w >= 2 ->
+      blank_at(d, area, geometry.Position(..pos, x: pos.x + 1))
+    Content(..) -> d
+  }
+}
+
+fn blank_at(d: Draft, area: geometry.Rect, pos: geometry.Position) -> Draft {
+  case geometry.contains(area, pos) {
+    True -> draft_set(pos_to_idx(area, pos), empty_cell(), d)
+    False -> d
+  }
+}
+
 /// Set cells from a string starting at `pos`. No hyperlink.
 /// Wide graphemes (width=2) take one Cell + one Continuation cell.
 pub fn set_string(

@@ -8,6 +8,7 @@ Runnable Gleam apps that depend on **étui**. They live in this repository so yo
 | --- | --- |
 | [minimal/](minimal/) | Smallest `run_buffered` app, quit with `q` |
 | [counter/](counter/) | Split layout, block + paragraph, space to increment |
+| [image/](image/) | Probe for graphics, then show a PNG in kitty, Ghostty or iTerm2 |
 | [snippets.md](snippets.md) | Copy-paste fragments (not full projects) |
 
 ## Run from clone (path dependency)

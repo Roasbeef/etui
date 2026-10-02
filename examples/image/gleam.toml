@@ -1,0 +1,8 @@
+name = "image"
+version = "1.0.0"
+description = "Show a PNG inline with the kitty or iTerm2 graphics protocol"
+licences = ["MIT"]
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+etui = { path = "../.." }
