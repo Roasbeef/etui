@@ -50,3 +50,12 @@ pub fn keys_that_share_an_introducer_still_arrive_test() {
   keys_of(esc <> "[A") |> should.equal([KeyPress("up")])
   keys_of(esc <> "[<35;10;5M") |> should.equal([MouseMove(9, 4)])
 }
+
+pub fn alt_underscore_then_a_typed_g_is_still_keys_test() {
+  // `G` alone used to commit to a kitty reply and hold every key after it
+  // until the next ESC. A kitty reply always starts `G i =`.
+  let input.Parsed(events, rest) = input.parse(esc <> "_Gx")
+  events
+  |> should.equal([KeyPress("alt+_"), KeyPress("G"), KeyPress("x")])
+  rest |> should.equal("")
+}

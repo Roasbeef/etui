@@ -23,8 +23,12 @@
 //// None of these introducers is produced by a key. `CSI ? ... c` and
 //// `CSI ... t` have no key meaning in any terminal's encoding. `ESC _` and
 //// `ESC P` are Alt+underscore and Alt+Shift+P, so those two are taken as a
-//// reply only when the next byte that only a reply sends is already there
-//// (`G` and `> |`); a lone Alt+underscore is still a key.
+//// reply only when the bytes that only a reply sends are already there:
+//// `G i =` for kitty, whose replies always carry the id the query sent, and
+//// `> |` for XTVERSION. A lone Alt+underscore is still a key, and so is
+//// Alt+underscore followed by a typed `G`: requiring `G` alone would have
+//// taken that pair as the start of a reply and held every later key until
+//// the next ESC.
 ////
 //// The recogniser is total. A reply that has the right introducer but a body
 //// that does not parse is a `Malformed` value: it is still consumed, because
@@ -97,7 +101,8 @@ pub type Recognised {
 /// ```
 pub fn recognise(after_escape: List(String)) -> Recognised {
   case after_escape {
-    ["_", "G", ..body] -> string_reply(body, [], kitty_reply)
+    // The `i=` is kept as the start of the body, which `kitty_reply` parses.
+    ["_", "G", "i", "=", ..body] -> string_reply(body, ["=", "i"], kitty_reply)
     ["P", ">", "|", ..body] -> string_reply(body, [], TerminalVersion)
     ["[", ..body] -> csi_reply(body)
     _ -> NotAReply
@@ -115,7 +120,7 @@ pub fn recognise(after_escape: List(String)) -> Recognised {
 /// ```
 pub fn could_begin(after_escape: List(String)) -> Bool {
   case after_escape {
-    [] | ["_"] | ["P"] | ["P", ">"] -> True
+    [] | ["_"] | ["_", "G"] | ["_", "G", "i"] | ["P"] | ["P", ">"] -> True
     _ -> False
   }
 }
