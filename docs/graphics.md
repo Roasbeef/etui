@@ -42,8 +42,8 @@ or the deadline passes. The query is, in order:
 
 | Query | Positive answer |
 |---|---|
-| kitty `a=q` for one pixel, id 31 | `ESC _ G i=31;OK ESC \` |
-| XTVERSION, `CSI > 0 q` | a name starting `iTerm2` |
+| kitty `a=q` for one pixel, id 31 | `ESC _ G i=31;OK ESC \`, from a terminal on the placeholder list below |
+| XTVERSION, `CSI > 0 q` | a name starting `iTerm2`, or the name that admits kitty |
 | `CSI 16 t` | the cell size in pixels |
 | `CSI 14 t` and `CSI 18 t` | the window in pixels and in cells, for terminals without `16 t` |
 | DA1, `CSI c` | always answered; ends the probe |
@@ -51,6 +51,17 @@ or the deadline passes. The query is, in order:
 Terminals answer in the order they were asked, so a reply that has not come
 before DA1's is not coming. A local terminal answers in a few milliseconds;
 the deadline is spent in full only on a terminal that does not answer DA1.
+
+An `OK` to the kitty query proves the graphics protocol, not the Unicode
+placeholders etui draws through, so kitty support also needs the
+terminal-version reply to name a terminal known to implement them
+(`probe.implements_placeholders`). The list is kitty (`kitty(`) and Ghostty
+(`ghostty`). It exists because two terminals answer `OK` and would draw
+wrongly: WezTerm ignores the virtual placement (`U=1`), draws the image at
+the cursor, and shows the placeholder cells as missing glyphs; iTerm2 3.5
+answers too, and is drawn with OSC 1337 instead. A terminal that names
+itself iTerm2 therefore always gets OSC 1337, whatever its kitty answer. A
+terminal that gains placeholders is added to the list.
 
 `probe.run` leaves the terminal in raw mode for the backend that follows,
 because the Erlang runtime switches into raw mode once per session. Run it in

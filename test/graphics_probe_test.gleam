@@ -165,10 +165,39 @@ pub fn a_reply_after_da1_does_not_count_test() {
   c |> should.equal(graphics.none())
 }
 
-pub fn another_terminal_named_in_xtversion_is_not_iterm2_test() {
-  let c = caps([xtversion("WezTerm 20240203") <> da1()])
+pub fn wezterm_answering_the_kitty_query_is_not_kitty_test() {
+  // WezTerm answers `a=q` with OK but ignores `U=1`: it would draw the image
+  // at the cursor and the placeholder cells as missing glyphs.
+  let c =
+    caps([kitty_ok() <> xtversion("WezTerm 20240203-110809-5046fc22") <> da1()])
+  c.kitty |> should.equal(Unsupported)
   c.iterm2 |> should.equal(Unsupported)
-  c.terminal |> should.equal(Some("WezTerm 20240203"))
+  c.terminal |> should.equal(Some("WezTerm 20240203-110809-5046fc22"))
+  graphics.protocol(c) |> should.equal(TextOnly)
+}
+
+pub fn iterm2_answering_the_kitty_query_still_gets_osc_1337_test() {
+  let c = caps([kitty_ok() <> xtversion("iTerm2 3.5.4") <> da1()])
+  c.kitty |> should.equal(Unsupported)
+  c.iterm2 |> should.equal(Supported)
+  graphics.protocol(c) |> should.equal(Iterm2)
+}
+
+pub fn ghostty_answering_the_kitty_query_is_kitty_test() {
+  let c = caps([kitty_ok() <> xtversion("ghostty 1.2.0") <> da1()])
+  graphics.protocol(c) |> should.equal(Kitty)
+}
+
+pub fn a_kitty_ok_with_no_version_reply_is_not_kitty_test() {
+  caps([kitty_ok() <> da1()]).kitty |> should.equal(Unsupported)
+}
+
+pub fn the_placeholder_list_is_kitty_and_ghostty_test() {
+  probe.implements_placeholders("kitty(0.39.1)") |> should.be_true
+  probe.implements_placeholders("ghostty 1.2.0") |> should.be_true
+  probe.implements_placeholders("WezTerm 20240203") |> should.be_false
+  probe.implements_placeholders("iTerm2 3.5.4") |> should.be_false
+  probe.implements_placeholders("tmux 3.4") |> should.be_false
 }
 
 pub fn cell_size_falls_back_to_window_over_cells_test() {
@@ -188,7 +217,13 @@ pub fn a_zero_cell_report_is_no_answer_test() {
 pub fn keys_typed_during_the_probe_are_kept_apart_test() {
   let p =
     probed([
-      "ab" <> kitty_ok() <> "c" <> esc <> "[A" <> xtversion("kitty") <> "d",
+      "ab"
+        <> kitty_ok()
+        <> "c"
+        <> esc
+        <> "[A"
+        <> xtversion("kitty(0.39.1)")
+        <> "d",
       da1() <> "e",
     ])
   probe.capabilities(p).kitty |> should.equal(Supported)

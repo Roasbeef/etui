@@ -32,6 +32,7 @@
 
 import etui/graphics.{
   type Capabilities, type CellSize, Capabilities, CellSize, Supported,
+  Unsupported,
 }
 import etui/graphics/reply.{type Reply}
 import gleam/list
@@ -147,8 +148,10 @@ pub fn typed(probe: Probe) -> String {
 /// What the replies so far say, believing only positive answers.
 ///
 /// - kitty graphics is `Supported` when the query was answered `OK` under
-///   `query_image_id`. An error message is a terminal that speaks the
-///   protocol and could not load the pixel, which is not support.
+///   `query_image_id` and the terminal-version reply names a terminal that
+///   implements Unicode placeholders (`implements_placeholders`). An error
+///   message is a terminal that speaks the protocol and could not load the
+///   pixel, which is not support.
 /// - OSC 1337 is `Supported` when the terminal-version reply starts with
 ///   `iTerm2`. `TERM_PROGRAM` is never consulted.
 /// - The cell size comes from the cell report, or else from the window's
@@ -156,7 +159,46 @@ pub fn typed(probe: Probe) -> String {
 ///   terminals send, is no answer.
 pub fn capabilities(probe: Probe) -> Capabilities {
   list.fold(list.reverse(probe.rev_replies), graphics.none(), apply)
+  |> require_placeholders
   |> fill_cell_size(probe.rev_replies)
+}
+
+/// Whether a terminal-version reply names a terminal known to draw kitty
+/// images through Unicode placeholder cells: kitty (`kitty(0.39.1)`) and
+/// Ghostty (`ghostty 1.2.0`).
+///
+/// An `OK` to the graphics query proves the protocol, not the placeholders,
+/// and etui draws only through placeholders. WezTerm answers `OK` and then
+/// ignores `U=1`, drawing the image at the cursor and the placeholder cells
+/// as missing glyphs. iTerm2 3.5 also answers `OK`, and it is better served
+/// by OSC 1337. So kitty support is believed only for terminals on this
+/// list; a terminal that gains placeholders is added here.
+///
+/// ## Examples
+///
+/// ```gleam
+/// probe.implements_placeholders("ghostty 1.2.0")
+/// // -> True
+///
+/// probe.implements_placeholders("WezTerm 20240203-110809-5046fc22")
+/// // -> False
+/// ```
+pub fn implements_placeholders(xtversion: String) -> Bool {
+  string.starts_with(xtversion, "kitty(")
+  || string.starts_with(string.lowercase(xtversion), "ghostty")
+}
+
+// A kitty `OK` without a terminal-version reply naming a terminal on the
+// list is not support: see `implements_placeholders`.
+fn require_placeholders(caps: Capabilities) -> Capabilities {
+  case caps.terminal {
+    Some(name) ->
+      case implements_placeholders(name) {
+        True -> caps
+        False -> Capabilities(..caps, kitty: Unsupported)
+      }
+    None -> Capabilities(..caps, kitty: Unsupported)
+  }
 }
 
 fn apply(caps: Capabilities, r: Reply) -> Capabilities {

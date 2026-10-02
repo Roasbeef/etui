@@ -65,8 +65,10 @@ pub type CellSize {
 /// probe that timed out all produce `none()`.
 pub type Capabilities {
   Capabilities(
-    /// The kitty graphics protocol: a one-pixel query was answered `OK`
-    /// before the primary device attributes reply.
+    /// kitty graphics through Unicode placeholders: a one-pixel query was
+    /// answered `OK` before the primary device attributes reply, and the
+    /// terminal-version reply names kitty or Ghostty
+    /// (`probe.implements_placeholders`).
     kitty: Support,
     /// OSC 1337 inline images: the terminal-version reply names iTerm2.
     iterm2: Support,
@@ -109,9 +111,11 @@ pub type Protocol {
 
 /// Pick the protocol to use from what the terminal said.
 ///
-/// kitty wins when both answered, because its placeholder cells are text: the
-/// frame differ moves and clips them like any other cell, where an OSC 1337
-/// image has to be redrawn by hand whenever its box moves.
+/// kitty wins when both are `Supported`, because its placeholder cells are
+/// text: the frame differ moves and clips them like any other cell, where an
+/// OSC 1337 image has to be redrawn by hand whenever its box moves. A probe
+/// never reports both, since iTerm2 is not on the placeholder list, so a
+/// terminal that names itself iTerm2 always gets OSC 1337.
 ///
 /// ## Examples
 ///
