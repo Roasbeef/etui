@@ -75,7 +75,14 @@ completed by the next one.
 
 A reply that arrives after the deadline reaches the backend instead. The
 input parser recognises the same six replies (`etui/graphics/reply`) and
-drops them, so a slow terminal's answer never reaches the app as keys.
+drops them, so a slow terminal's answer never reaches the app as keys. Two
+gaps remain: a reply cut by a read boundary exactly at the deadline can leave
+its tail, the part after its introducer, to arrive as keys, and keys typed
+while the probe runs are dropped rather than handed to the app.
+
+On JavaScript, a placeholder and its marks are one cell because
+`Intl.Segmenter` groups them into one grapheme, as Node 22 does; a runtime
+without it would measure the marks separately.
 
 ## Choosing a size
 

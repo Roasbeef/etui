@@ -335,7 +335,10 @@ fn write(bytes: String) -> Nil
 /// The keyboard reader started here is the one the backend goes on to use.
 /// A reply that arrives after the deadline is therefore read by the backend,
 /// where `etui/input` recognises it and drops it rather than delivering it as
-/// keys. Keys typed during the probe are not handed on.
+/// keys. Two things are lost: a reply cut by a read boundary exactly at the
+/// deadline can leave its tail to arrive as keys, since the backend sees it
+/// without its introducer, and keys typed during the probe are dropped
+/// rather than handed on.
 ///
 /// The deadline is the caller's: a local terminal answers in a few
 /// milliseconds, and the wait is only ever spent in full on a terminal that

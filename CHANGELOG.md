@@ -36,7 +36,8 @@ Small, but they will not compile silently:
 - **Inline images (`etui/graphics`):** a capability probe and kitty and
   iTerm2 image output. `probe.query` and a pure reply parser (`probe.feed`,
   `probe.capabilities`) find kitty graphics by a one-pixel `a=q` query
-  followed by DA1, iTerm2 by its XTVERSION name, and the cell size from
+  followed by DA1, believed only from kitty and Ghostty (the terminals known
+  to implement Unicode placeholders), iTerm2 by its XTVERSION name, and the cell size from
   `CSI 16 t` or `CSI 14 t` over `CSI 18 t`; only positive answers count.
   `probe.run` does the round trip on Erlang within a caller's deadline.
   `kitty.transmit`, `place` and `delete` speak the protocol in quiet mode,
