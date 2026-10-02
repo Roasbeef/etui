@@ -30,6 +30,7 @@ import etui/backend.{
   type InputEvent, KeyPress, MouseDrag, MouseLeft, MouseMiddle, MouseMove,
   MousePress, MouseRelease, MouseRight, MouseScroll, Paste,
 }
+import etui/graphics/reply
 import gleam/int
 import gleam/list
 import gleam/result
@@ -82,12 +83,41 @@ fn parse_loop(
       case g == esc {
         False -> parse_loop(rest, [KeyPress(simple_key(g)), ..rev])
         True ->
-          case parse_esc(rest) {
-            Ok(#(event, remaining)) -> parse_loop(remaining, [event, ..rev])
+          case escape_step(rest) {
+            Decoded(event, remaining) -> parse_loop(remaining, [event, ..rev])
+            Dropped(remaining) -> parse_loop(remaining, rev)
+
             // Incomplete: hand back everything from the ESC onwards so the
             // caller can prepend it to the next read.
-            Error(Nil) -> #(rev, gs)
+            Held -> #(rev, gs)
           }
+      }
+  }
+}
+
+// What one ESC and the graphemes after it come to. A separate value rather
+// than a call back into `parse_loop`, so the loop stays self-recursive: the
+// JavaScript target eliminates only self tail calls, and a burst of mouse
+// reports would otherwise grow the stack by one frame per sequence.
+type EscapeStep {
+  Decoded(event: InputEvent, rest: List(String))
+  Dropped(rest: List(String))
+  Held
+}
+
+// A terminal's reply to a query is checked for before a key sequence, and
+// dropped. Replies to a graphics probe that arrive after the probe stopped
+// waiting land here, and decoded as keys they would be a burst of nonsense
+// presses (`etui/graphics/reply` lists what is recognised and why no key
+// can be mistaken for one).
+fn escape_step(rest: List(String)) -> EscapeStep {
+  case reply.recognise(rest) {
+    reply.Recognised(_, remaining) -> Dropped(remaining)
+    reply.Incomplete -> Held
+    reply.NotAReply ->
+      case parse_esc(rest) {
+        Ok(#(event, remaining)) -> Decoded(event, remaining)
+        Error(Nil) -> Held
       }
   }
 }
