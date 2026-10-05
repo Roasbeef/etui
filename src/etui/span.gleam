@@ -174,11 +174,10 @@ pub fn render_line(
   case max_width <= 0 {
     True -> buf
     False -> {
-      let content_width = line_width(l)
       let offset = case l.alignment {
         text.Left -> 0
-        text.Right -> int.max(0, max_width - content_width)
-        text.Center -> int.max(0, { max_width - content_width } / 2)
+        text.Right -> int.max(0, max_width - line_width(l))
+        text.Center -> int.max(0, { max_width - line_width(l) } / 2)
       }
       let start_x = pos.x + offset
       render_spans(buf, pos, l.spans, start_x, pos.x + max_width)
