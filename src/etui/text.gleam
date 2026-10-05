@@ -54,6 +54,16 @@ pub fn cell_width(s: String) -> Int {
 fn ascii_cells(bytes: BitArray, width: Int) -> Result(Int, Nil) {
   case bytes {
     <<>> -> Ok(width)
+    <<a:8, b:8, c:8, d:8, rest:bits>>
+      if a >= 0x20
+      && a <= 0x7E
+      && b >= 0x20
+      && b <= 0x7E
+      && c >= 0x20
+      && c <= 0x7E
+      && d >= 0x20
+      && d <= 0x7E
+    -> ascii_cells(rest, width + 4)
     <<byte:8, rest:bits>> if byte >= 0x20 && byte <= 0x7E ->
       ascii_cells(rest, width + 1)
     _ -> Error(Nil)
