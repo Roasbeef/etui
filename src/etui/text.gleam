@@ -17,8 +17,10 @@
 /// **Limitation:** emoji whose width depends on terminal/font (e.g. keycap
 /// sequences, skin-tone modifiers) are approximated as 2 cells. Behaviour
 /// may differ on terminals that render them as narrow.
+import gleam/bit_array
 import gleam/int
 import gleam/list
+import gleam/result
 import gleam/string
 
 // ─────────────────────────────────────────────────────────────────
@@ -39,9 +41,23 @@ pub fn graphemes(s: String) -> List(String) {
 
 /// Cell width of a string (sum of grapheme widths).
 pub fn cell_width(s: String) -> Int {
-  s
-  |> string.to_graphemes
-  |> list.fold(0, fn(acc, g) { acc + grapheme_cell_width(g) })
+  result.lazy_unwrap(ascii_cells(bit_array.from_string(s), 0), fn() {
+    s
+    |> string.to_graphemes
+    |> list.fold(0, fn(acc, g) { acc + grapheme_cell_width(g) })
+  })
+}
+
+// Printable ASCII needs no segmentation or Unicode classification. The
+// entire string must qualify: a following combining mark or variation
+// selector can change the cluster that starts with an ASCII character.
+fn ascii_cells(bytes: BitArray, width: Int) -> Result(Int, Nil) {
+  case bytes {
+    <<>> -> Ok(width)
+    <<byte:8, rest:bits>> if byte >= 0x20 && byte <= 0x7E ->
+      ascii_cells(rest, width + 1)
+    _ -> Error(Nil)
+  }
 }
 
 /// Cell width of a single grapheme cluster.
@@ -56,6 +72,15 @@ pub fn cell_width(s: String) -> Int {
 /// grapheme_cell_width("☺\u{FE0F}") // 2, VS16 asked for the emoji glyph
 /// ```
 pub fn grapheme_cell_width(g: String) -> Int {
+  case bit_array.from_string(g) {
+    <<byte:8>> if byte < 0x20 || byte == 0x7F -> 0
+    <<byte:8>> if byte <= 0x7E -> 1
+    _ -> unicode_grapheme_width(g)
+  }
+}
+
+// Non-ASCII clusters retain the Unicode and presentation-selector rules.
+fn unicode_grapheme_width(g: String) -> Int {
   case string.to_utf_codepoints(g) {
     [] -> 0
     [cp] -> codepoint_cell_width(string.utf_codepoint_to_int(cp))

@@ -8,6 +8,20 @@ import gleam/list
 import gleam/string
 import gleeunit/should
 
+// ASCII ends at DEL; control bytes keep their zero-width semantics, and a
+// selector after an ASCII base still belongs to that base's grapheme.
+pub fn ascii_width_preserves_control_and_cluster_boundaries_test() {
+  text.cell_width(
+    " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~",
+  )
+  |> should.equal(95)
+  text.cell_width("a\n\r\t\u{7F}b") |> should.equal(2)
+  text.cell_width("abc\u{301}") |> should.equal(3)
+  text.cell_width("abc\u{FE0F}") |> should.equal(4)
+  text.cell_width("abc漢") |> should.equal(5)
+  text.grapheme_cell_width("c\u{FE0F}") |> should.equal(2)
+}
+
 // ─── cell_width: CJK strings ───────────────────────────────────────
 
 pub fn cjk_string_two_chars_test() {
