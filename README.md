@@ -17,7 +17,7 @@ Inspired by [ratatui](https://ratatui.rs/): buffer-diff rendering, layout constr
 
 > *étui* (French): a small, fitted case that holds and protects delicate instruments. This library is that case for your terminal: a snug shell around buffers, widgets, and Unicode, so your app stays clean inside.
 
-**Requirements:** Gleam 1.16+, Erlang/OTP 26+ for terminal apps, Node 22+ for the JavaScript target. Both targets run the full test suite and the full demos.
+**Requirements:** Gleam 1.19+, Erlang/OTP 26+ for terminal apps, Node 22+ for the JavaScript target. Both targets run the full test suite and the full demos.
 
 ```text
 ┌─ Sidebar ──┐┌─ Main ──────────────────────────┐

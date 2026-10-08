@@ -4,7 +4,7 @@ Thanks for helping improve étui. This is a **library** (not an application): ke
 
 ## Setup
 
-- Gleam **1.16+** (see CI).
+- Gleam **1.19+** (see CI).
 - Erlang/OTP **26+** for terminal development.
 - Node **22+** only if you work on the JavaScript target or run `etui_js_smoke`.
 
