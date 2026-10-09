@@ -202,6 +202,17 @@ pub fn scroll_test() {
   |> should.equal([MouseScroll(0, 0, False)])
 }
 
+pub fn horizontal_wheel_is_not_a_vertical_scroll_test() {
+  // Cb 66 and 67 are the wheel's left and right. Decoding every wheel event
+  // whose button bits are not 0 as "down" made a diagonal swipe stutter.
+  events("\u{001B}[<66;3;7M")
+  |> should.equal([MouseMove(2, 6)])
+  events("\u{001B}[<67;3;7M")
+  |> should.equal([MouseMove(2, 6)])
+  events("\u{001B}[<70;3;7M")
+  |> should.equal([MouseMove(2, 6)])
+}
+
 pub fn scroll_with_a_modifier_is_still_a_scroll_test() {
   // Cb 68 is shift+wheel-up. The old decoder only knew 64 and 65 and reported
   // this as a button press.

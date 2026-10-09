@@ -316,12 +316,22 @@ fn parse_sgr_mouse(
 // Cb is a bitfield: bits 0-1 are the button (3 = none), bit 5 marks a motion
 // event, bit 6 marks the wheel. Bits 2-4 are shift/alt/ctrl, which do not
 // change which button is reported.
+//
+// With bit 6 set, the button bits name the wheel's axis and direction: 0 and
+// 1 are vertical up and down, 2 and 3 are horizontal left and right. A
+// trackpad swipe is never perfectly vertical, so terminals that report the
+// horizontal axis send those events in the middle of a vertical swipe. They
+// are not vertical motion, and reading every non-zero button as "down" turned
+// each sideways wobble into a spurious notch against the swipe. They decode
+// as a plain move, which the event type already has and consumers ignore.
 fn mouse_event(cb: Int, x: Int, y: Int, pressed: Bool) -> InputEvent {
   let button_bits = int.bitwise_and(cb, 3)
   let motion = int.bitwise_and(cb, 32) != 0
   let wheel = int.bitwise_and(cb, 64) != 0
   case wheel, motion, button_bits {
-    True, _, b -> MouseScroll(x, y, b == 0)
+    True, _, 0 -> MouseScroll(x, y, True)
+    True, _, 1 -> MouseScroll(x, y, False)
+    True, _, _ -> MouseMove(x, y)
     // Button 3 during motion means no button is held: a plain move.
     False, True, 3 -> MouseMove(x, y)
     False, True, b -> MouseDrag(x, y, button_of(b))
