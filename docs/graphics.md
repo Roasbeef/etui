@@ -31,8 +31,10 @@ let caps = case graphics.decide(getenv) {
 ```
 
 `graphics.decide` takes the app's own environment lookup and skips the probe
-inside Herdr (`HERDR_ENV`) and under `NO_COLOR`. tmux is asked like any other
-terminal: it answers the version and device-attribute requests itself and
+under non-empty `NO_COLOR`. Herdr and tmux are asked like any other
+terminal. Herdr's `libghostty` reply plus a successful Kitty query enables
+Unicode placeholders. Removing Herdr's separate pane-graphics API did not
+remove standard Kitty rendering. tmux answers the version and device-attribute requests itself and
 drops the graphics query, so the answer comes back "no" without a special
 case.
 

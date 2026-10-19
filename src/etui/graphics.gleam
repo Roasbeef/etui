@@ -136,9 +136,8 @@ pub fn protocol(caps: Capabilities) -> Protocol {
 
 /// Why a probe should not be sent.
 pub type SkipReason {
-  /// `HERDR_ENV` is set. Herdr does not pass pane graphics through (it removed
-  /// its pane-graphics API in 0.9.3), and the query bytes would reach a pane
-  /// that cannot answer them.
+  /// A legacy skip reason retained for source compatibility. Herdr panes
+  /// now receive the same capability probe as other terminals.
   InsideHerdr
 
   /// `NO_COLOR` is set to a non-empty value. An image is colour, and the
@@ -176,15 +175,13 @@ pub type Decision {
 ///     _ -> Error(Nil)
 ///   }
 /// })
-/// // -> graphics.Skip(graphics.InsideHerdr)
+/// // -> graphics.Probe
 /// ```
 pub fn decide(getenv: fn(String) -> Result(String, Nil)) -> Decision {
-  case getenv("HERDR_ENV"), getenv("NO_COLOR") {
-    Ok(_), _ -> Skip(InsideHerdr)
-
+  case getenv("NO_COLOR") {
     // no-color.org: the variable counts when it is present and not empty.
-    Error(Nil), Ok(value) if value != "" -> Skip(ColourDisabled)
-    Error(Nil), _ -> Probe
+    Ok(value) if value != "" -> Skip(ColourDisabled)
+    Ok(_) | Error(Nil) -> Probe
   }
 }
 
