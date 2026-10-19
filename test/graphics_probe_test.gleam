@@ -3,8 +3,8 @@
 //// a byte string a terminal could send.
 
 import etui/graphics.{
-  CellSize, ColourDisabled, InsideHerdr, Iterm2, Kitty, Skip, Supported,
-  TextOnly, Unsupported,
+  CellSize, ColourDisabled, Iterm2, Kitty, Skip, Supported, TextOnly,
+  Unsupported,
 }
 import etui/graphics/probe
 import etui/graphics/reply
@@ -289,9 +289,9 @@ fn env(pairs: List(#(String, String))) -> fn(String) -> Result(String, Nil) {
   fn(name) { list.key_find(pairs, name) }
 }
 
-pub fn decide_skips_inside_herdr_and_under_no_color_test() {
+pub fn decide_probes_herdr_and_respects_no_color_test() {
   graphics.decide(env([])) |> should.equal(graphics.Probe)
-  graphics.decide(env([#("HERDR_ENV", "1")])) |> should.equal(Skip(InsideHerdr))
+  graphics.decide(env([#("HERDR_ENV", "1")])) |> should.equal(graphics.Probe)
   graphics.decide(env([#("NO_COLOR", "1")]))
   |> should.equal(Skip(ColourDisabled))
 
@@ -306,4 +306,27 @@ pub fn decide_skips_inside_herdr_and_under_no_color_test() {
 // The integers from `from` to `to`, both included.
 fn inclusive(from: Int, to: Int) -> List(Int) {
   int.range(from: to, to: from - 1, with: [], run: fn(acc, i) { [i, ..acc] })
+}
+
+// Captured from a real Herdr 0.9.1 pane. The Kitty reply proves support;
+// libghostty identifies an implementation with Unicode placeholders.
+pub fn herdr_libghostty_reply_keeps_positive_kitty_support_test() {
+  let reply = "\u{1b}_Gi=31;OK\u{1b}\\\u{1b}P>|libghostty\u{1b}\\\u{1b}[?62;22c"
+  let actual = probe.new() |> probe.feed(reply) |> probe.capabilities
+  actual.kitty |> should.equal(Supported)
+  graphics.protocol(actual) |> should.equal(Kitty)
+
+  // A name alone cannot enable graphics in a pane with graphics disabled.
+  let absent =
+    probe.new()
+    |> probe.feed("\u{1b}P>|libghostty\u{1b}\\\u{1b}[?62;22c")
+    |> probe.capabilities
+  absent.kitty |> should.equal(Unsupported)
+  let refused =
+    probe.new()
+    |> probe.feed(
+      "\u{1b}_Gi=31;ENOTSUP\u{1b}\\\u{1b}P>|libghostty\u{1b}\\\u{1b}[?62;22c",
+    )
+    |> probe.capabilities
+  refused.kitty |> should.equal(Unsupported)
 }

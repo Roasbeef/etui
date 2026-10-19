@@ -165,7 +165,8 @@ pub fn capabilities(probe: Probe) -> Capabilities {
 
 /// Whether a terminal-version reply names a terminal known to draw kitty
 /// images through Unicode placeholder cells: kitty (`kitty(0.39.1)`) and
-/// Ghostty (`ghostty 1.2.0`).
+/// Ghostty (`ghostty 1.2.0`), and its embedded terminal (`libghostty`, as
+/// reported by Herdr). The positive graphics reply is still required.
 ///
 /// An `OK` to the graphics query proves the protocol, not the placeholders,
 /// and etui draws only through placeholders. WezTerm answers `OK` and then
@@ -186,6 +187,7 @@ pub fn capabilities(probe: Probe) -> Capabilities {
 pub fn implements_placeholders(xtversion: String) -> Bool {
   string.starts_with(xtversion, "kitty(")
   || string.starts_with(string.lowercase(xtversion), "ghostty")
+  || string.starts_with(string.lowercase(xtversion), "libghostty")
 }
 
 // A kitty `OK` without a terminal-version reply naming a terminal on the
