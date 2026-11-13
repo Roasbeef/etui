@@ -40,20 +40,35 @@ pub fn graphemes(s: String) -> List(String) {
 }
 
 /// Cell width of a string (sum of grapheme widths).
+///
+/// Printable ASCII is measured a byte at a time, and only the stretches that
+/// contain something else go through grapheme segmentation, so a transcript
+/// line with one `✓` in it costs a few graphemes instead of all of them.
+///
+/// ```gleam
+/// cell_width("ok ✓ done") // 9
+/// ```
 pub fn cell_width(s: String) -> Int {
-  result.lazy_unwrap(ascii_cells(bit_array.from_string(s), 0), fn() {
-    s
-    |> string.to_graphemes
-    |> list.fold(0, fn(acc, g) { acc + grapheme_cell_width(g) })
-  })
+  measure(bit_array.from_string(s), 0, NoBase)
 }
 
-// Printable ASCII needs no segmentation or Unicode classification. The
-// entire string must qualify: a following combining mark or variation
-// selector can change the cluster that starts with an ASCII character.
-fn ascii_cells(bytes: BitArray, width: Int) -> Result(Int, Nil) {
+// The ASCII character a scan has just counted, if the byte after it could still
+// join its cluster. Only a printable one can be the base of a cluster that
+// grows: every control character is a cluster of its own, and a line feed
+// after a carriage return is the one pair of ASCII characters that share a
+// cluster, both zero cells wide.
+type Base {
+  NoBase
+  Base(byte: Int)
+}
+
+// Walks the string a byte at a time. Printable ASCII is one cell. A control
+// character is none, and ends any base. A codepoint that cannot join a
+// neighbouring cluster (`standalone`) is measured by itself, and the first one
+// that can hands the scan to `measure_region`.
+fn measure(bytes: BitArray, width: Int, base: Base) -> Int {
   case bytes {
-    <<>> -> Ok(width)
+    <<>> -> width
     <<a:8, b:8, c:8, d:8, rest:bits>>
       if a >= 0x20
       && a <= 0x7E
@@ -63,11 +78,145 @@ fn ascii_cells(bytes: BitArray, width: Int) -> Result(Int, Nil) {
       && c <= 0x7E
       && d >= 0x20
       && d <= 0x7E
-    -> ascii_cells(rest, width + 4)
+    -> measure(rest, width + 4, Base(d))
     <<byte:8, rest:bits>> if byte >= 0x20 && byte <= 0x7E ->
-      ascii_cells(rest, width + 1)
-    _ -> Error(Nil)
+      measure(rest, width + 1, Base(byte))
+    <<byte:8, rest:bits>> if byte < 0x80 -> measure(rest, width, NoBase)
+    _ -> {
+      let #(n, rest) = decode_codepoint(bytes)
+      case standalone(n) && next_is_standalone(rest) {
+        True -> measure(rest, width + codepoint_cell_width(n), NoBase)
+
+        // A codepoint that is itself standalone but has a neighbour that is not
+        // cannot attach to the base before it, so that base stays counted.
+        False ->
+          case standalone(n) {
+            True -> measure_region(bytes, width, NoBase)
+            False -> measure_region(bytes, width, base)
+          }
+      }
+    }
   }
+}
+
+// The codepoint at the front of `bytes`, which starts with a UTF-8 lead byte,
+// and what follows it. This reads the bytes itself because UTF-codepoint
+// patterns do not exist on the JavaScript target. The string was valid UTF-8
+// when it came in and every cut lands on a character boundary, so the last
+// arm is unreachable.
+fn decode_codepoint(bytes: BitArray) -> #(Int, BitArray) {
+  case bytes {
+    <<b1:8, b2:8, rest:bits>> if b1 >= 0xC0 && b1 < 0xE0 -> #(
+      { b1 - 0xC0 } * 64 + { b2 - 0x80 },
+      rest,
+    )
+    <<b1:8, b2:8, b3:8, rest:bits>> if b1 >= 0xE0 && b1 < 0xF0 -> #(
+      { b1 - 0xE0 } * 4096 + { b2 - 0x80 } * 64 + { b3 - 0x80 },
+      rest,
+    )
+    <<b1:8, b2:8, b3:8, b4:8, rest:bits>> if b1 >= 0xF0 -> #(
+      { b1 - 0xF0 }
+        * 262_144
+        + { b2 - 0x80 }
+        * 4096
+        + { b3 - 0x80 }
+        * 64
+        + { b4 - 0x80 },
+      rest,
+    )
+    _ -> #(0, <<>>)
+  }
+}
+
+// Whether the next character is one the scan can take whole: the end of the
+// string, any ASCII byte, or a standalone codepoint.
+fn next_is_standalone(rest: BitArray) -> Bool {
+  case rest {
+    <<>> -> True
+    <<byte:8, _:bits>> if byte < 0x80 -> True
+    _ -> standalone(decode_codepoint(rest).0)
+  }
+}
+
+// A codepoint is standalone when no grapheme rule joins it to a neighbour
+// that is itself ASCII or standalone. That excludes everything that is Extend,
+// ZWJ, SpacingMark or Prepend (which join what is beside them), regional
+// indicators and Hangul jamo (which pair with each other), and the Indic
+// scripts (conjuncts). What is listed is the Latin, Greek and Cyrillic text,
+// the punctuation, arrows, mathematical, technical, box drawing, geometric,
+// dingbat and symbol blocks, kana, Han ideographs, Hangul syllables and the
+// emoji blocks above the skin tone modifiers, which is what terminal output is
+// made of. Two of them side by side never share a cluster, so a standalone
+// codepoint is its own cluster whenever its neighbours are standalone or ASCII.
+fn standalone(cp: Int) -> Bool {
+  case cp {
+    n if n >= 0xA0 && n <= 0x2FF -> True
+    n if n >= 0x370 && n <= 0x3FF -> True
+    n if n >= 0x400 && n <= 0x482 -> True
+    n if n >= 0x48A && n <= 0x52F -> True
+    n if n >= 0x2010 && n <= 0x2027 -> True
+    n if n >= 0x2030 && n <= 0x205E -> True
+    n if n >= 0x2190 && n <= 0x27BF -> True
+    n if n >= 0x2B00 && n <= 0x2BFF -> True
+    n if n >= 0x3041 && n <= 0x3096 -> True
+    n if n >= 0x30A1 && n <= 0x30FA -> True
+    n if n >= 0x3400 && n <= 0x4DBF -> True
+    n if n >= 0x4E00 && n <= 0x9FFF -> True
+    n if n >= 0xAC00 && n <= 0xD7A3 -> True
+    n if n >= 0x1F300 && n <= 0x1F3FA -> True
+    n if n >= 0x1F400 && n <= 0x1FAFF -> True
+    _ -> False
+  }
+}
+
+// Measures one stretch that segmentation has to see, then resumes the byte
+// scan after it. A combining mark, variation selector or joiner after an
+// ASCII character changes that character's cluster, so the stretch starts at
+// the ASCII character before the first non-ASCII byte, which is taken back out
+// of the running width. A prepended mark changes the cluster of the character
+// after it, which is why `take_region` keeps the one printable ASCII character
+// that follows. The stretch always begins and ends at a cluster boundary: two
+// printable ASCII characters never share a cluster, so measuring each side
+// separately gives what measuring the whole string would.
+fn measure_region(bytes: BitArray, width: Int, base: Base) -> Int {
+  let #(region, rest) = case base {
+    NoBase -> take_region(bytes, <<>>)
+    Base(byte:) -> take_region(bytes, <<byte:8>>)
+  }
+  let carried = case base {
+    NoBase -> width
+    Base(..) -> width - 1
+  }
+  measure(rest, carried + clusters_width(region), NoBase)
+}
+
+// Splits the stretch off the front of `bytes`. It takes every non-ASCII byte,
+// and a printable ASCII character that sits between two non-ASCII bytes, since
+// nothing separates it from them. The first printable ASCII character that has
+// ASCII or the end of the string after it is the last one taken. A control
+// character is a boundary on both sides, so it is left for `measure`.
+fn take_region(bytes: BitArray, region: BitArray) -> #(BitArray, BitArray) {
+  case bytes {
+    <<byte:8, rest:bits>> if byte >= 0x80 ->
+      take_region(rest, <<region:bits, byte:8>>)
+    <<byte:8, rest:bits>> if byte >= 0x20 && byte <= 0x7E ->
+      case rest {
+        <<next:8, _:bits>> if next >= 0x80 ->
+          take_region(rest, <<region:bits, byte:8>>)
+        _ -> #(<<region:bits, byte:8>>, rest)
+      }
+    _ -> #(region, bytes)
+  }
+}
+
+// The stretch is whole characters cut at ASCII bytes, so it is valid UTF-8
+// and the empty string is only the unreachable fallback.
+fn clusters_width(region: BitArray) -> Int {
+  region
+  |> bit_array.to_string
+  |> result.unwrap("")
+  |> string.to_graphemes
+  |> list.fold(0, fn(acc, g) { acc + grapheme_cell_width(g) })
 }
 
 /// Cell width of a single grapheme cluster.
