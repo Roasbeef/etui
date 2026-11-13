@@ -199,8 +199,18 @@ fn render_spans(
         True -> buf
         False -> {
           let avail = x_end - x
-          let content = text.truncate(sp.content, avail, "")
-          let w = text.cell_width(content)
+
+          // A span that fits is drawn as it is, and the width that proved it
+          // fits is the width to advance by. Only one that overflows is cut,
+          // and its prefix is measured afresh.
+          let whole = text.cell_width(sp.content)
+          let #(content, w) = case whole <= avail {
+            True -> #(sp.content, whole)
+            False -> {
+              let cut = text.truncate(sp.content, avail, "")
+              #(cut, text.cell_width(cut))
+            }
+          }
           let buf2 =
             buffer.set_string_linked(
               buf,
